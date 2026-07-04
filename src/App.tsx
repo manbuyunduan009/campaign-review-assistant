@@ -175,6 +175,17 @@ interface ActionCheckItem {
   status: 'passed' | 'warning' | 'manual'
   title: string
   evidence: string
+  failureReason?: string
+  beforeUrl?: string
+  afterUrl?: string
+  beforeImage?: string
+  afterImage?: string
+  changed?: boolean
+  urlChanged?: boolean
+  textChanged?: boolean
+  popupOpened?: boolean
+  dialogs?: Array<{ type: string; message: string }>
+  matchedElement?: PageElement | null
 }
 
 interface ActionCheckResponse {
@@ -466,7 +477,7 @@ function App() {
           ? `图片 OCR：识别 ${ocrResults.length} 张图，文本 ${collectOcrText(ocrResults).length} 字`
           : '图片 OCR：未识别',
         actionResults.length
-          ? `功能点测：通过 ${actionResults.filter((item) => item.status === 'passed').length} 项，风险 ${actionResults.filter((item) => item.status === 'warning').length} 项`
+          ? `功能点测：通过 ${actionResults.filter((item) => item.status === 'passed').length} 项，风险 ${actionResults.filter((item) => item.status === 'warning').length} 项，待确认 ${actionResults.filter((item) => item.status === 'manual').length} 项`
           : '功能点测：未运行',
         `人工确认：通过 ${decisionStats.passed}，需修改 ${decisionStats.needsChange}，待确认 ${decisionStats.pending}，忽略 ${decisionStats.ignored}`,
         finalConclusion.trim() ? `最终结论：${finalConclusion.trim()}` : '最终结论：未填写',
@@ -800,11 +811,14 @@ function App() {
       }
 
       const results = data.results || []
+      const passed = results.filter((item) => item.status === 'passed').length
+      const warning = results.filter((item) => item.status === 'warning').length
+      const manual = results.filter((item) => item.status === 'manual').length
 
       setActionResults(results)
       addMessage(
         'assistant',
-        `功能点测完成：通过 ${results.filter((item) => item.status === 'passed').length} 项，风险 ${results.filter((item) => item.status === 'warning').length} 项。`,
+        `功能点测完成：通过 ${passed} 项，风险 ${warning} 项，待确认 ${manual} 项。`,
       )
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '功能点测失败')
@@ -1245,11 +1259,24 @@ function buildMarkdownReport(input: MarkdownReportInput) {
   lines.push('', '## 功能点测', '')
 
   if (input.actionResults.length) {
-    input.actionResults.forEach((item) => {
+    input.actionResults.forEach((item, index) => {
       lines.push(
-        `- ${item.title}`,
-        `  - 状态：${semanticStatusLabel(item.status)}`,
-        `  - 证据：${item.evidence}`,
+        `### ${index + 1}. ${item.title}`,
+        '',
+        `- 状态：${semanticStatusLabel(item.status)}`,
+        `- 功能词：${item.term}`,
+        `- 失败原因：${item.failureReason || '无'}`,
+        `- 点击前 URL：${item.beforeUrl || '未记录'}`,
+        `- 点击后 URL：${item.afterUrl || '未记录'}`,
+        `- URL 变化：${item.urlChanged ? '是' : '否'}`,
+        `- 页面文本变化：${item.textChanged ? '是' : '否'}`,
+        `- 新窗口 / 弹窗页：${item.popupOpened ? '是' : '否'}`,
+        `- 浏览器弹窗：${item.dialogs?.length ? item.dialogs.map((dialog) => dialog.message).join(' / ') : '无'}`,
+        `- 候选入口：${item.matchedElement ? describeElement(item.matchedElement) : '未找到'}`,
+        `- 证据：${item.evidence}`,
+        item.beforeImage ? `- 点测前截图：\n\n![${item.term} 点测前](${item.beforeImage})` : '',
+        item.afterImage ? `- 点测后截图：\n\n![${item.term} 点测后](${item.afterImage})` : '',
+        '',
       )
     })
   } else {
@@ -2251,10 +2278,7 @@ function ContentAndFolderPanel({
           />
         ) : null}
         {actionResults.length ? (
-          <ResultList
-            title="功能点测结果"
-            items={actionResults.map((item) => `${semanticStatusLabel(item.status)} / ${item.title}：${item.evidence}`)}
-          />
+          <ActionResultsPanel results={actionResults} />
         ) : null}
         {copyResult?.missing.length ? (
           <ResultList title="疑似缺失文案" items={copyResult.missing.map((item) => item.source)} />
@@ -2302,6 +2326,55 @@ function ResultList({ title, items }: { title: string; items: string[] }) {
           <p key={item} className="rounded-sm bg-background px-2 py-1 text-xs">
             {item}
           </p>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ActionResultsPanel({ results }: { results: ActionCheckItem[] }) {
+  return (
+    <div className="rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 text-xs font-semibold text-muted-foreground">功能点测结果</div>
+      <div className="max-h-96 space-y-2 overflow-auto pr-1">
+        {results.map((item) => (
+          <article key={`${item.term}-${item.title}`} className="rounded-md border border-border bg-background p-2">
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">{item.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{item.term}</p>
+              </div>
+              <Badge variant={semanticStatusVariant(item.status)}>{semanticStatusLabel(item.status)}</Badge>
+            </div>
+            <div className="grid gap-2 text-xs text-muted-foreground">
+              <p>点击前：{item.beforeUrl || '未记录'}</p>
+              <p>点击后：{item.afterUrl || '未记录'}</p>
+              <p>
+                变化：URL {item.urlChanged ? '是' : '否'} / 文本 {item.textChanged ? '是' : '否'} / 新窗口 {item.popupOpened ? '是' : '否'}
+              </p>
+              {item.failureReason ? (
+                <p className="rounded-sm bg-amber-50 px-2 py-1 text-amber-800">失败原因：{item.failureReason}</p>
+              ) : null}
+              {item.dialogs?.length ? <p>弹窗：{item.dialogs.map((dialog) => dialog.message).join(' / ')}</p> : null}
+              <p>{item.evidence}</p>
+            </div>
+            {item.beforeImage || item.afterImage ? (
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {item.beforeImage ? (
+                  <figure className="rounded-md border border-border bg-panel p-1">
+                    <img src={item.beforeImage} alt={`${item.term} 点测前`} className="max-h-40 w-full object-contain" />
+                    <figcaption className="mt-1 text-center text-[11px] text-muted-foreground">点测前</figcaption>
+                  </figure>
+                ) : null}
+                {item.afterImage ? (
+                  <figure className="rounded-md border border-border bg-panel p-1">
+                    <img src={item.afterImage} alt={`${item.term} 点测后`} className="max-h-40 w-full object-contain" />
+                    <figcaption className="mt-1 text-center text-[11px] text-muted-foreground">点测后</figcaption>
+                  </figure>
+                ) : null}
+              </div>
+            ) : null}
+          </article>
         ))}
       </div>
     </div>

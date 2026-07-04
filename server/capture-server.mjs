@@ -269,7 +269,7 @@ app.post('/api/check-actions', async (request, response) => {
       viewport: { width: 390, height: 844 },
       isMobile: true,
       hasTouch: true,
-      deviceScaleFactor: 3,
+      deviceScaleFactor: 1,
       userAgent:
         'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
     })
@@ -291,6 +291,7 @@ app.post('/api/check-actions', async (request, response) => {
         const beforeUrl = page.url()
         const beforeText = await page.evaluate(() => document.body.innerText.slice(0, 6000))
         const meta = await collectPageMeta(page)
+        const beforeImage = await captureActionImage(page)
         const candidate = meta.interactiveElements.find((element) =>
           matchesTerm(`${element.text} ${element.href} ${element.selector}`, term),
         )
@@ -301,13 +302,47 @@ app.post('/api/check-actions', async (request, response) => {
             status: 'warning',
             title: `未找到功能入口：${term}`,
             evidence: '页面可点击元素中没有匹配入口',
+            failureReason: '页面可点击元素没有包含该功能词或常见别名',
+            beforeUrl,
+            afterUrl: beforeUrl,
+            beforeImage,
+            afterImage: beforeImage,
+            changed: false,
+            urlChanged: false,
+            textChanged: false,
+            popupOpened: false,
+            dialogs,
+            matchedElement: null,
           })
           await page.close()
           continue
         }
 
         const popupPromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null)
-        await clickMatchedElement(page, term)
+        const clicked = await clickMatchedElement(page, term)
+
+        if (!clicked) {
+          results.push({
+            term,
+            status: 'warning',
+            title: `${term}点测失败`,
+            evidence: `${candidate.text || candidate.href || candidate.selector}；找到候选入口，但点击脚本未命中实际 DOM`,
+            failureReason: '找到候选入口，但点击脚本未命中实际 DOM',
+            beforeUrl,
+            afterUrl: beforeUrl,
+            beforeImage,
+            afterImage: beforeImage,
+            changed: false,
+            urlChanged: false,
+            textChanged: false,
+            popupOpened: false,
+            dialogs,
+            matchedElement: candidate,
+          })
+          await page.close()
+          continue
+        }
+
         const popup = await popupPromise
 
         if (popup) {
@@ -318,24 +353,43 @@ app.post('/api/check-actions', async (request, response) => {
 
         const afterUrl = popup ? popup.url() : page.url()
         const afterText = await page.evaluate(() => document.body.innerText.slice(0, 6000)).catch(() => '')
+        const afterImage = await captureActionImage(popup || page)
+        const urlChanged = beforeUrl !== afterUrl
+        const textChanged = normalizeForMatch(beforeText) !== normalizeForMatch(afterText)
         const changed =
-          beforeUrl !== afterUrl ||
+          urlChanged ||
           dialogs.length > 0 ||
           Boolean(popup) ||
-          normalizeForMatch(beforeText) !== normalizeForMatch(afterText)
+          textChanged
+        const failureReason = changed
+          ? ''
+          : candidate.href
+            ? '入口有 href，但点击后未检测到 URL、弹窗或页面文本变化，需人工复核'
+            : '点击后未检测到 URL、弹窗或页面文本变化'
 
         results.push({
           term,
-          status: changed || candidate.href ? 'passed' : 'manual',
+          status: changed ? 'passed' : 'manual',
           title: `${term}入口点测`,
           evidence: [
             candidate.text || candidate.href || candidate.selector,
             candidate.href ? `href: ${candidate.href}` : '无显式 href',
-            changed ? `点测后有变化：${afterUrl}` : '点测后未检测到明显变化',
+            changed ? `点测后有变化：${afterUrl}` : failureReason,
             dialogs.length ? `弹窗：${dialogs.map((dialog) => dialog.message).join(' / ')}` : '',
           ]
             .filter(Boolean)
             .join('；'),
+          failureReason,
+          beforeUrl,
+          afterUrl,
+          beforeImage,
+          afterImage,
+          changed,
+          urlChanged,
+          textChanged,
+          popupOpened: Boolean(popup),
+          dialogs,
+          matchedElement: candidate,
         })
 
         if (popup) {
@@ -347,6 +401,17 @@ app.post('/api/check-actions', async (request, response) => {
           status: 'warning',
           title: `${term}点测失败`,
           evidence: error instanceof Error ? error.message : '未知错误',
+          failureReason: error instanceof Error ? error.message : '未知错误',
+          beforeUrl: page.url(),
+          afterUrl: page.url(),
+          beforeImage: await captureActionImage(page).catch(() => ''),
+          afterImage: '',
+          changed: false,
+          urlChanged: false,
+          textChanged: false,
+          popupOpened: false,
+          dialogs,
+          matchedElement: null,
         })
       } finally {
         await page.close().catch(() => undefined)
@@ -510,6 +575,16 @@ async function collectPageMeta(page) {
       backgroundImages,
     }
   })
+}
+
+async function captureActionImage(page) {
+  const screenshot = await page.screenshot({
+    fullPage: false,
+    type: 'jpeg',
+    quality: 54,
+  })
+
+  return `data:image/jpeg;base64,${screenshot.toString('base64')}`
 }
 
 async function clickMatchedElement(page, term) {
