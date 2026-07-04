@@ -1,6 +1,7 @@
 import type { ChangeEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Archive,
   Bot,
   Camera,
   ClipboardList,
@@ -12,14 +13,18 @@ import {
   FolderOpen,
   Link2,
   Loader2,
+  Plus,
   MonitorSmartphone,
   MousePointerClick,
   Paperclip,
   RotateCcw,
+  Save,
   Search,
   Send,
   ShieldCheck,
   ScanText,
+  Sparkles,
+  Trash2,
   Upload,
 } from 'lucide-react'
 import { Badge } from './components/ui/badge'
@@ -30,9 +35,11 @@ import type { PageType, ReviewIssue } from './types'
 
 const captureEndpoint = 'http://127.0.0.1:4317/api/capture'
 const searchFolderEndpoint = 'http://127.0.0.1:4317/api/search-folder'
+const assetPreviewEndpoint = 'http://127.0.0.1:4317/api/asset-preview'
 const ocrEndpoint = 'http://127.0.0.1:4317/api/ocr'
 const actionCheckEndpoint = 'http://127.0.0.1:4317/api/check-actions'
 const reviewStateStorageKey = 'campaign-review-assistant:review-state:v1'
+const reviewProjectsStorageKey = 'campaign-review-assistant:projects:v1'
 const pageTypes: PageType[] = ['网页移动端', '小程序', '游戏内嵌页', '网吧内嵌页']
 const knownBusinessTerms = [
   '下载游戏',
@@ -157,6 +164,17 @@ interface FolderSearchResponse {
   message?: string
 }
 
+interface FolderAssetPreview {
+  ok: boolean
+  path?: string
+  name?: string
+  ext?: string
+  type?: FolderAsset['type']
+  content?: string
+  dataUrl?: string
+  message?: string
+}
+
 interface OcrItem {
   id: string
   label: string
@@ -256,16 +274,38 @@ type ReviewDecisionMap = Record<string, ReviewDecision>
 interface PersistedReviewState {
   decisions: ReviewDecisionMap
   finalConclusion: string
+  projectName?: string
+  activeTemplateId?: string
+  smartSummary?: string
   pageType?: PageType
   url?: string
   cmsText?: string
   captureMeta?: CaptureMeta | null
+  diffStats?: DiffStats | null
   copyResult?: CopyCheckResult | null
   ocrResults?: OcrItem[]
   actionResults?: ActionCheckItem[]
   folderPath?: string
   folderQuery?: string
   folderAssets?: FolderAsset[]
+}
+
+interface ReviewProject {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  summary: string
+  state: PersistedReviewState
+}
+
+interface ReviewTemplate {
+  id: string
+  title: string
+  pageType: PageType
+  description: string
+  folderQuery: string
+  checks: string[]
 }
 
 interface MarkdownReportInput {
@@ -281,6 +321,7 @@ interface MarkdownReportInput {
   semanticResult: SemanticReviewResult
   reviewDecisions: ReviewDecisionMap
   finalConclusion: string
+  smartSummary: string
 }
 
 const baseIssues: ReviewIssue[] = [
@@ -310,8 +351,74 @@ const baseIssues: ReviewIssue[] = [
   },
 ]
 
+const reviewTemplates: ReviewTemplate[] = [
+  {
+    id: 'mobile-campaign',
+    title: '网页移动端专题',
+    pageType: '网页移动端',
+    description: '适合 H5、移动端活动页、预约页和专题页。',
+    folderQuery: '移动端 专题 H5 预约 活动 需求 UE 设计稿',
+    checks: [
+      '首屏主视觉、活动标题、核心 CTA 是否完整展示',
+      '右上角下载游戏、分享、返回等固定入口是否符合需求',
+      '预约、购票、领取、查看详情等按钮文案是否与 CMS 一致',
+      '核心按钮点击后是否跳转、弹窗或状态变化',
+      '活动资讯、公告、规则说明是否与业务方文案一致',
+      '页面底部兜底入口和适配安全区需人工确认',
+    ],
+  },
+  {
+    id: 'mini-program',
+    title: '小程序页面',
+    pageType: '小程序',
+    description: '适合小程序活动页、任务页和承接页。',
+    folderQuery: '小程序 活动页 任务 路由 授权 UE 需求',
+    checks: [
+      '顶部导航、返回、分享能力是否符合小程序规范',
+      '登录、授权、订阅消息等状态是否有明确反馈',
+      '主要按钮文案、任务状态、领取状态是否与 CMS 一致',
+      '跳转路径、弹窗、二次确认流程是否符合 UE 描述',
+      '缺省态、已领取、不可领取、活动结束态需人工确认',
+    ],
+  },
+  {
+    id: 'game-webview',
+    title: '游戏内嵌页',
+    pageType: '游戏内嵌页',
+    description: '适合游戏 WebView、福利页、任务页和兑换页。',
+    folderQuery: '游戏内嵌 WebView 任务 领取 兑换 登录态 UE',
+    checks: [
+      '页面是否避免依赖浏览器外链能力，返回/关闭入口是否明确',
+      '登录态、角色区服、绑定状态是否展示正确',
+      '领取、兑换、抽奖、报名等按钮状态是否符合需求',
+      '成功、失败、重复领取、资格不足等反馈需人工确认',
+      '游戏内跳转、协议唤起、弹窗遮罩是否可点测',
+    ],
+  },
+  {
+    id: 'cafe-webview',
+    title: '网吧内嵌页',
+    pageType: '网吧内嵌页',
+    description: '适合网吧客户端、门店权益、扫码和活动承接页。',
+    folderQuery: '网吧 内嵌 客户端 权益 扫码 活动 UE',
+    checks: [
+      '网吧身份、门店、设备环境相关信息是否展示清楚',
+      '扫码、领取、登录、下载等入口是否符合客户端限制',
+      '权益文案、活动时间、门店说明是否与 CMS 一致',
+      '外链跳转、协议唤起、关闭返回流程需人工确认',
+      '异常态、无资格、网络失败和活动结束态需人工确认',
+    ],
+  },
+]
+
 function App() {
   const persistedState = useMemo(loadPersistedReviewState, [])
+  const persistedProjects = useMemo(loadReviewProjects, [])
+  const [projectName, setProjectName] = useState(
+    persistedState.projectName || makeDefaultProjectName(persistedState.url || ''),
+  )
+  const [activeProjectId, setActiveProjectId] = useState('')
+  const [activeTemplateId, setActiveTemplateId] = useState(persistedState.activeTemplateId || '')
   const [pageType, setPageType] = useState<PageType>(persistedState.pageType || '网页移动端')
   const [url, setUrl] = useState(
     persistedState.url || 'https://test-zt.xoyo.com/jx3.xoyo.com/p/m/2026/07/20/anniversary/#/',
@@ -330,8 +437,9 @@ function App() {
   const [folderError, setFolderError] = useState('')
   const [ocrError, setOcrError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [isPreviewingAsset, setIsPreviewingAsset] = useState(false)
   const [captureMeta, setCaptureMeta] = useState<CaptureMeta | null>(persistedState.captureMeta || null)
-  const [diffStats, setDiffStats] = useState<DiffStats | null>(null)
+  const [diffStats, setDiffStats] = useState<DiffStats | null>(persistedState.diffStats || null)
   const [cmsText, setCmsText] = useState(persistedState.cmsText || '')
   const [copyResult, setCopyResult] = useState<CopyCheckResult | null>(persistedState.copyResult || null)
   const [ocrResults, setOcrResults] = useState<OcrItem[]>(persistedState.ocrResults || [])
@@ -339,9 +447,12 @@ function App() {
   const [folderPath, setFolderPath] = useState(persistedState.folderPath || 'D:\\vscode\\动效\\docs')
   const [folderQuery, setFolderQuery] = useState(persistedState.folderQuery || '周年庆 预约 演唱会')
   const [folderAssets, setFolderAssets] = useState<FolderAsset[]>(persistedState.folderAssets || [])
+  const [assetPreview, setAssetPreview] = useState<FolderAssetPreview | null>(null)
+  const [projects, setProjects] = useState<ReviewProject[]>(persistedProjects)
   const [chatInput, setChatInput] = useState('')
   const [reviewDecisions, setReviewDecisions] = useState<ReviewDecisionMap>(persistedState.decisions)
   const [finalConclusion, setFinalConclusion] = useState(persistedState.finalConclusion)
+  const [smartSummary, setSmartSummary] = useState(persistedState.smartSummary || '')
   const [reportNotice, setReportNotice] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -355,10 +466,14 @@ function App() {
     persistReviewState({
       decisions: reviewDecisions,
       finalConclusion,
+      projectName,
+      activeTemplateId,
+      smartSummary,
       pageType,
       url,
       cmsText,
       captureMeta,
+      diffStats,
       copyResult,
       ocrResults,
       actionResults,
@@ -368,16 +483,20 @@ function App() {
     })
   }, [
     actionResults,
+    activeTemplateId,
     captureMeta,
     cmsText,
     copyResult,
+    diffStats,
     finalConclusion,
     folderAssets,
     folderPath,
     folderQuery,
     ocrResults,
     pageType,
+    projectName,
     reviewDecisions,
+    smartSummary,
     url,
   ])
 
@@ -507,6 +626,7 @@ function App() {
         semanticResult,
         reviewDecisions,
         finalConclusion,
+        smartSummary,
       }),
     [
       actionResults,
@@ -520,6 +640,7 @@ function App() {
       pageType,
       reviewDecisions,
       semanticResult,
+      smartSummary,
       url,
     ],
   )
@@ -660,6 +781,201 @@ function App() {
 
     setFinalConclusion(lines.join('\n'))
     setReportNotice('结论草稿已生成，可继续人工修改')
+  }
+
+  function currentReviewState(): PersistedReviewState {
+    return {
+      decisions: reviewDecisions,
+      finalConclusion,
+      projectName,
+      activeTemplateId,
+      smartSummary,
+      pageType,
+      url,
+      cmsText,
+      captureMeta,
+      diffStats,
+      copyResult,
+      ocrResults,
+      actionResults,
+      folderPath,
+      folderQuery,
+      folderAssets,
+    }
+  }
+
+  function applyReviewState(state: PersistedReviewState) {
+    setProjectName(state.projectName || makeDefaultProjectName(state.url || ''))
+    setActiveTemplateId(state.activeTemplateId || '')
+    setSmartSummary(state.smartSummary || '')
+    setPageType(pageTypes.includes(state.pageType as PageType) ? (state.pageType as PageType) : '网页移动端')
+    setUrl(state.url || '')
+    setCmsText(state.cmsText || '')
+    setCaptureMeta(state.captureMeta || null)
+    setDiffStats(state.diffStats || null)
+    setCopyResult(state.copyResult || null)
+    setOcrResults(Array.isArray(state.ocrResults) ? state.ocrResults : [])
+    setActionResults(Array.isArray(state.actionResults) ? state.actionResults : [])
+    setFolderPath(state.folderPath || 'D:\\vscode\\动效\\docs')
+    setFolderQuery(state.folderQuery || '')
+    setFolderAssets(Array.isArray(state.folderAssets) ? state.folderAssets : [])
+    setReviewDecisions(state.decisions || {})
+    setFinalConclusion(state.finalConclusion || '')
+    setAssetPreview(null)
+    setDesignPreview('')
+    setActualPreview('')
+    setDiffPreview('')
+  }
+
+  function saveCurrentProject() {
+    const now = new Date().toISOString()
+    const state = sanitizeProjectState({
+      ...currentReviewState(),
+      projectName: projectName.trim() || makeDefaultProjectName(url),
+    })
+    const project: ReviewProject = {
+      id: activeProjectId || createId(),
+      name: state.projectName || makeDefaultProjectName(url),
+      createdAt: projects.find((item) => item.id === activeProjectId)?.createdAt || now,
+      updatedAt: now,
+      summary: buildProjectSummary(state, semanticResult),
+      state,
+    }
+    const nextProjects = [project, ...projects.filter((item) => item.id !== project.id)]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 24)
+
+    setProjects(nextProjects)
+    setActiveProjectId(project.id)
+    persistReviewProjects(nextProjects)
+    setReportNotice('验收项目已保存到本机')
+  }
+
+  function loadProject(projectId: string) {
+    const project = projects.find((item) => item.id === projectId)
+
+    if (!project) return
+
+    applyReviewState(project.state)
+    setActiveProjectId(project.id)
+    addMessage('assistant', `已载入历史项目「${project.name}」。`)
+  }
+
+  function deleteProject(projectId: string) {
+    const nextProjects = projects.filter((item) => item.id !== projectId)
+
+    setProjects(nextProjects)
+    persistReviewProjects(nextProjects)
+
+    if (activeProjectId === projectId) {
+      setActiveProjectId('')
+    }
+
+    setReportNotice('历史项目已删除')
+  }
+
+  function createNewProject() {
+    applyReviewState({
+      decisions: {},
+      finalConclusion: '',
+      projectName: makeDefaultProjectName(''),
+      activeTemplateId: '',
+      smartSummary: '',
+      pageType: '网页移动端',
+      url: '',
+      cmsText: '',
+      captureMeta: null,
+      diffStats: null,
+      copyResult: null,
+      ocrResults: [],
+      actionResults: [],
+      folderPath: 'D:\\vscode\\动效\\docs',
+      folderQuery: '',
+      folderAssets: [],
+    })
+    setActiveProjectId('')
+    setMessages([
+      {
+        id: Date.now(),
+        role: 'assistant',
+        text: '已新建一个空验收项目。可以先套模板，再粘贴 URL、资料文件夹或 CMS 文案。',
+      },
+    ])
+  }
+
+  function applyReviewTemplate(template: ReviewTemplate) {
+    const block = [
+      `模板：${template.title}`,
+      ...template.checks.map((item) => `- ${item}`),
+    ].join('\n')
+
+    setPageType(template.pageType)
+    setActiveTemplateId(template.id)
+    setFolderQuery(template.folderQuery)
+    setCmsText((current) => [current.trim(), block].filter(Boolean).join('\n\n'))
+    setCopyResult(null)
+    setActionResults([])
+    setSmartSummary('')
+    addMessage('assistant', `已套用「${template.title}」验收模板，检查项已加入输入区。`)
+  }
+
+  async function previewFolderAsset(asset: FolderAsset) {
+    setIsPreviewingAsset(true)
+    setFolderError('')
+
+    try {
+      const response = await fetch(assetPreviewEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: asset.path }),
+      })
+      const data = (await response.json()) as FolderAssetPreview
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || '资料预览失败')
+      }
+
+      setAssetPreview(data)
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : '资料预览失败')
+    } finally {
+      setIsPreviewingAsset(false)
+    }
+  }
+
+  function usePreviewAsDesign() {
+    if (!assetPreview?.dataUrl) return
+
+    setDesignPreview(assetPreview.dataUrl)
+    setDiffPreview('')
+    setDiffStats(null)
+    setOcrResults((current) => current.filter((item) => item.id !== 'design'))
+    addMessage('assistant', `已把「${assetPreview.name || '图片资料'}」设为设计稿证据。`)
+  }
+
+  function generateSmartSummary() {
+    const summary = buildSmartSummary({
+      pageType,
+      url,
+      captureMeta,
+      hasDesign: Boolean(designPreview),
+      copyResult,
+      ocrResults,
+      actionResults,
+      folderAssets,
+      semanticResult,
+      reviewDecisions,
+    })
+
+    setSmartSummary(summary)
+    setReportNotice('智能总结已生成')
+  }
+
+  function applySmartSummaryToConclusion() {
+    if (!smartSummary.trim()) return
+
+    setFinalConclusion((current) => [smartSummary.trim(), current.trim()].filter(Boolean).join('\n\n'))
+    setReportNotice('智能总结已写入最终结论')
   }
 
   async function copyMarkdownReport() {
@@ -979,6 +1295,20 @@ function App() {
 
       <section className="mx-auto grid max-w-[1440px] gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
+          <ProjectAndTemplatePanel
+            projectName={projectName}
+            projects={projects}
+            activeProjectId={activeProjectId}
+            templates={reviewTemplates}
+            activeTemplateId={activeTemplateId}
+            onProjectNameChange={setProjectName}
+            onSaveProject={saveCurrentProject}
+            onLoadProject={loadProject}
+            onDeleteProject={deleteProject}
+            onNewProject={createNewProject}
+            onApplyTemplate={applyReviewTemplate}
+          />
+
           <section className="rounded-md border border-border bg-background shadow-sm">
             <div className="border-b border-border px-4 py-3">
               <div className="flex items-center gap-2 text-sm font-semibold">
@@ -1109,11 +1439,15 @@ function App() {
               folderPath={folderPath}
               folderQuery={folderQuery}
               folderAssets={folderAssets}
+              assetPreview={assetPreview}
               isSearchingFolder={isSearchingFolder}
+              isPreviewingAsset={isPreviewingAsset}
               onFolderPathChange={setFolderPath}
               onFolderQueryChange={setFolderQuery}
               onSearchFolder={() => searchFolder()}
               onAppendAsset={appendFolderAssetToSource}
+              onPreviewAsset={previewFolderAsset}
+              onUsePreviewAsDesign={usePreviewAsDesign}
             />
           </section>
         </div>
@@ -1146,6 +1480,11 @@ function App() {
               hasDesign={Boolean(designPreview)}
               hasActual={Boolean(actualPreview)}
               onGenerateConclusion={generateConclusionDraft}
+            />
+            <SmartSummaryPanel
+              summary={smartSummary}
+              onGenerate={generateSmartSummary}
+              onApplyToConclusion={applySmartSummaryToConclusion}
             />
             <label className="mb-3 block space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">最终结论 / 验收备注</span>
@@ -1229,10 +1568,14 @@ function loadPersistedReviewState(): PersistedReviewState {
     return {
       decisions: parsed.decisions || {},
       finalConclusion: String(parsed.finalConclusion || ''),
+      projectName: parsed.projectName ? String(parsed.projectName) : undefined,
+      activeTemplateId: parsed.activeTemplateId ? String(parsed.activeTemplateId) : undefined,
+      smartSummary: parsed.smartSummary ? String(parsed.smartSummary) : undefined,
       pageType: pageTypes.includes(parsed.pageType as PageType) ? (parsed.pageType as PageType) : undefined,
       url: parsed.url ? String(parsed.url) : undefined,
       cmsText: parsed.cmsText ? String(parsed.cmsText) : undefined,
       captureMeta: parsed.captureMeta || null,
+      diffStats: parsed.diffStats || null,
       copyResult: parsed.copyResult || null,
       ocrResults: Array.isArray(parsed.ocrResults) ? parsed.ocrResults : [],
       actionResults: Array.isArray(parsed.actionResults) ? parsed.actionResults : [],
@@ -1249,6 +1592,125 @@ function persistReviewState(state: PersistedReviewState) {
   if (typeof window === 'undefined') return
 
   window.localStorage.setItem(reviewStateStorageKey, JSON.stringify(state))
+}
+
+function loadReviewProjects(): ReviewProject[] {
+  if (typeof window === 'undefined') return []
+
+  try {
+    const raw = window.localStorage.getItem(reviewProjectsStorageKey)
+
+    if (!raw) return []
+
+    const parsed = JSON.parse(raw)
+
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .filter((item): item is ReviewProject => {
+        return Boolean(item?.id && item?.name && item?.state)
+      })
+      .slice(0, 24)
+  } catch {
+    return []
+  }
+}
+
+function persistReviewProjects(projects: ReviewProject[]) {
+  if (typeof window === 'undefined') return
+
+  window.localStorage.setItem(reviewProjectsStorageKey, JSON.stringify(projects.slice(0, 24)))
+}
+
+function createId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function makeDefaultProjectName(value: string) {
+  const urlName = value ? value.replace(/^https?:\/\//, '').split(/[/?#]/)[0] : ''
+
+  return urlName ? `${urlName} 验收` : `专题验收 ${formatHumanDate(new Date())}`
+}
+
+function sanitizeProjectState(state: PersistedReviewState): PersistedReviewState {
+  return {
+    ...state,
+    actionResults: (state.actionResults || []).map((item) => ({
+      ...item,
+      beforeImage: '',
+      afterImage: '',
+    })),
+  }
+}
+
+function buildProjectSummary(state: PersistedReviewState, semanticResult: SemanticReviewResult) {
+  const warningCount =
+    semanticResult.summary.display.warning +
+    semanticResult.summary.content.warning +
+    semanticResult.summary.function.warning
+  const actionRiskCount = (state.actionResults || []).filter((item) => item.status !== 'passed').length
+
+  return [
+    state.pageType || '未选择类型',
+    state.url ? shortenUrl(state.url) : '未填写 URL',
+    `风险 ${warningCount}`,
+    state.copyResult ? `文案缺失 ${state.copyResult.missing.length}` : '文案未对比',
+    state.actionResults?.length ? `点测待复核 ${actionRiskCount}` : '功能未点测',
+  ].join(' / ')
+}
+
+function buildSmartSummary({
+  pageType,
+  url,
+  captureMeta,
+  hasDesign,
+  copyResult,
+  ocrResults,
+  actionResults,
+  folderAssets,
+  semanticResult,
+  reviewDecisions,
+}: {
+  pageType: PageType
+  url: string
+  captureMeta: CaptureMeta | null
+  hasDesign: boolean
+  copyResult: CopyCheckResult | null
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  folderAssets: FolderAsset[]
+  semanticResult: SemanticReviewResult
+  reviewDecisions: ReviewDecisionMap
+}) {
+  const items = [...semanticResult.display, ...semanticResult.content, ...semanticResult.function]
+  const issueItems = items.filter((item) => shouldShowAsIssue(item, reviewDecisions[item.id]))
+  const actionRisks = actionResults.filter((item) => item.status !== 'passed')
+  const missingCopy = copyResult?.missing || []
+  const correctedOcrCount = ocrResults.filter((item) => item.corrected).length
+  const topIssues = issueItems.slice(0, 5).map((item, index) => `${index + 1}. ${item.title}：${item.evidence}`)
+  const nextSteps = [
+    !captureMeta ? '先采集页面截图，获得 DOM、按钮和资源证据。' : '',
+    !hasDesign ? '补充设计稿或从资料预览中设为设计稿，确认关键模块和背景。' : '',
+    !copyResult ? '运行 CMS 文案对比，优先确认上线文案。' : '',
+    missingCopy.length ? `复核 ${missingCopy.length} 条疑似缺失文案，必要时用 OCR 修正后再对比。` : '',
+    !actionResults.length ? '运行功能点测，确认核心 CTA 的跳转、弹窗或状态变化。' : '',
+    actionRisks.length ? `复核 ${actionRisks.length} 个功能点测风险，重点看失败原因和点测截图。` : '',
+    !folderAssets.length ? '搜索本地资料文件夹，把 PRD/UE 摘录纳入验收输入。' : '',
+  ].filter(Boolean)
+
+  return [
+    `验收对象：${pageType}${url ? ` / ${url}` : ''}`,
+    `总体判断：${issueItems.length ? `当前仍有 ${issueItems.length} 个风险项，需要继续复核。` : '当前机器检查未发现明确需修改项，可进入人工复核。'}`,
+    `证据完整度：${captureMeta ? '页面已采集' : '页面未采集'}；${hasDesign ? '设计稿已就绪' : '设计稿缺失'}；资料候选 ${folderAssets.length} 个；OCR 修正 ${correctedOcrCount} 项。`,
+    `文案风险：${copyResult ? `匹配 ${copyResult.matched.length} 条，疑似缺失 ${missingCopy.length} 条。` : '尚未运行 CMS 文案对比。'}`,
+    `功能风险：${actionResults.length ? `通过 ${actionResults.length - actionRisks.length} 项，风险/待确认 ${actionRisks.length} 项。` : '尚未运行功能点测。'}`,
+    '',
+    '重点问题：',
+    ...(topIssues.length ? topIssues : ['暂无明确风险项。']),
+    '',
+    '建议下一步：',
+    ...(nextSteps.length ? nextSteps.map((item, index) => `${index + 1}. ${item}`) : ['1. 按人工确认结果导出 Markdown 报告并归档。']),
+  ].join('\n')
 }
 
 function compactReviewDecisions(decisions: ReviewDecisionMap) {
@@ -1310,6 +1772,10 @@ function buildMarkdownReport(input: MarkdownReportInput) {
     '## 最终结论',
     '',
     input.finalConclusion.trim() || '未填写',
+    '',
+    '## 智能总结',
+    '',
+    input.smartSummary.trim() || '未生成',
     '',
     '## 汇总',
     '',
@@ -2101,6 +2567,107 @@ function get2dContext(canvas: HTMLCanvasElement) {
   return context
 }
 
+function ProjectAndTemplatePanel({
+  projectName,
+  projects,
+  activeProjectId,
+  templates,
+  activeTemplateId,
+  onProjectNameChange,
+  onSaveProject,
+  onLoadProject,
+  onDeleteProject,
+  onNewProject,
+  onApplyTemplate,
+}: {
+  projectName: string
+  projects: ReviewProject[]
+  activeProjectId: string
+  templates: ReviewTemplate[]
+  activeTemplateId: string
+  onProjectNameChange: (value: string) => void
+  onSaveProject: () => void
+  onLoadProject: (projectId: string) => void
+  onDeleteProject: (projectId: string) => void
+  onNewProject: () => void
+  onApplyTemplate: (template: ReviewTemplate) => void
+}) {
+  return (
+    <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <div>
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <Archive className="size-4" />
+            验收项目
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+            <Input value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} />
+            <Button variant="outline" onClick={onNewProject}>
+              <Plus />
+              新建
+            </Button>
+            <Button onClick={onSaveProject}>
+              <Save />
+              保存
+            </Button>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+            <select
+              value={activeProjectId}
+              onChange={(event) => onLoadProject(event.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            >
+              <option value="">选择历史项目</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name} / {formatHumanDate(new Date(project.updatedAt))}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="outline"
+              onClick={() => activeProjectId && onDeleteProject(activeProjectId)}
+              disabled={!activeProjectId}
+            >
+              <Trash2 />
+              删除
+            </Button>
+          </div>
+          {projects.length ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              已保存 {projects.length} 个本地验收项目，历史记录保留轻量证据，避免大截图占满浏览器存储。
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">还没有历史项目，完成一次验收后点击保存。</p>
+          )}
+        </div>
+        <div>
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <ClipboardList className="size-4" />
+            验收模板
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {templates.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                onClick={() => onApplyTemplate(template)}
+                className="rounded-md border border-border bg-panel p-3 text-left transition-colors hover:bg-muted"
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold">{template.title}</span>
+                  <Badge variant={activeTemplateId === template.id ? 'success' : 'outline'}>{template.pageType}</Badge>
+                </div>
+                <p className="text-xs leading-5 text-muted-foreground">{template.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function ReviewGoalCard({
   icon,
   title,
@@ -2300,6 +2867,45 @@ function ClosureRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+function SmartSummaryPanel({
+  summary,
+  onGenerate,
+  onApplyToConclusion,
+}: {
+  summary: string
+  onGenerate: () => void
+  onApplyToConclusion: () => void
+}) {
+  return (
+    <div className="mb-3 rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+          <Sparkles className="size-3.5" />
+          智能总结
+        </div>
+        <Badge variant={summary ? 'success' : 'outline'}>{summary ? '已生成' : '本地 v1'}</Badge>
+      </div>
+      {summary ? (
+        <Textarea value={summary} readOnly className="mb-2 min-h-36 font-mono text-xs" />
+      ) : (
+        <p className="mb-2 rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-muted-foreground">
+          根据展示、CMS、OCR、功能点测和资料命中生成验收建议；当前版本不调用云端模型。
+        </p>
+      )}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Button variant="outline" onClick={onGenerate}>
+          <Sparkles />
+          生成总结
+        </Button>
+        <Button variant="outline" onClick={onApplyToConclusion} disabled={!summary.trim()}>
+          <FileText />
+          写入结论
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function semanticStatusLabel(status: SemanticStatus) {
   if (status === 'passed') return '通过'
   if (status === 'warning') return '风险'
@@ -2442,11 +3048,15 @@ function ContentAndFolderPanel({
   folderPath,
   folderQuery,
   folderAssets,
+  assetPreview,
   isSearchingFolder,
+  isPreviewingAsset,
   onFolderPathChange,
   onFolderQueryChange,
   onSearchFolder,
   onAppendAsset,
+  onPreviewAsset,
+  onUsePreviewAsDesign,
 }: {
   cmsText: string
   onCmsTextChange: (value: string) => void
@@ -2459,11 +3069,15 @@ function ContentAndFolderPanel({
   folderPath: string
   folderQuery: string
   folderAssets: FolderAsset[]
+  assetPreview: FolderAssetPreview | null
   isSearchingFolder: boolean
+  isPreviewingAsset: boolean
   onFolderPathChange: (value: string) => void
   onFolderQueryChange: (value: string) => void
   onSearchFolder: () => void
   onAppendAsset: (asset: FolderAsset) => void
+  onPreviewAsset: (asset: FolderAsset) => void
+  onUsePreviewAsDesign: () => void
 }) {
   return (
     <section className="rounded-md border border-border bg-background p-4 shadow-sm">
@@ -2515,7 +3129,11 @@ function ContentAndFolderPanel({
               </div>
               <p className="truncate text-xs text-muted-foreground">{asset.relativePath}</p>
               {asset.snippet ? <p className="mt-1 text-xs text-muted-foreground">{asset.snippet}</p> : null}
-              <div className="mt-2 flex justify-end">
+              <div className="mt-2 flex justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={() => onPreviewAsset(asset)} disabled={isPreviewingAsset}>
+                  {isPreviewingAsset ? <Loader2 className="animate-spin" /> : <Eye />}
+                  预览
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => onAppendAsset(asset)}>
                   <FileText />
                   纳入输入
@@ -2524,6 +3142,9 @@ function ContentAndFolderPanel({
             </article>
           ))}
         </div>
+        {assetPreview ? (
+          <AssetPreviewPanel preview={assetPreview} onAppendAssetText={onCmsTextChange} cmsText={cmsText} onUseAsDesign={onUsePreviewAsDesign} />
+        ) : null}
       </div>
     </section>
   )
@@ -2534,6 +3155,63 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border border-border bg-panel p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-semibold">{value}</div>
+    </div>
+  )
+}
+
+function AssetPreviewPanel({
+  preview,
+  cmsText,
+  onAppendAssetText,
+  onUseAsDesign,
+}: {
+  preview: FolderAssetPreview
+  cmsText: string
+  onAppendAssetText: (value: string) => void
+  onUseAsDesign: () => void
+}) {
+  const previewText = preview.content?.trim() || ''
+
+  return (
+    <div className="rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">{preview.name || '资料预览'}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{preview.path}</p>
+        </div>
+        <Badge variant="outline">{preview.type || preview.ext || 'file'}</Badge>
+      </div>
+      {preview.dataUrl ? (
+        <div className="space-y-2">
+          <img src={preview.dataUrl} alt={preview.name || '资料图片'} className="max-h-64 w-full rounded-md object-contain" />
+          <Button variant="outline" className="w-full" onClick={onUseAsDesign}>
+            <FileImage />
+            设为设计稿
+          </Button>
+        </div>
+      ) : null}
+      {previewText ? (
+        <div className="space-y-2">
+          <Textarea value={previewText} readOnly className="max-h-64 min-h-32 font-mono text-xs" />
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() =>
+              onAppendAssetText(
+                [cmsText.trim(), `资料预览：${preview.name || '未命名资料'}`, previewText].filter(Boolean).join('\n'),
+              )
+            }
+          >
+            <FileText />
+            追加到验收输入
+          </Button>
+        </div>
+      ) : null}
+      {!preview.dataUrl && !previewText ? (
+        <p className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+          {preview.message || '该资料暂不支持直接预览，可先根据文件名和搜索摘录判断是否相关。'}
+        </p>
+      ) : null}
     </div>
   )
 }

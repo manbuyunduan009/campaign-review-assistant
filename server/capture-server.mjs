@@ -76,6 +76,13 @@ const supportedExtensions = new Set([
 ])
 
 const readableTextExtensions = new Set(['.md', '.txt', '.html', '.htm'])
+const previewImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp'])
+const imageMimeTypes = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+])
 
 app.post('/api/search-folder', async (request, response) => {
   try {
@@ -138,6 +145,77 @@ app.post('/api/search-folder', async (request, response) => {
     response.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : '资料搜索失败',
+    })
+  }
+})
+
+app.post('/api/asset-preview', async (request, response) => {
+  try {
+    const filePath = String(request.body?.path || '').trim()
+
+    if (!filePath) {
+      throw new Error('请输入要预览的资料路径')
+    }
+
+    const resolvedPath = path.resolve(filePath)
+    const stats = await fs.stat(resolvedPath)
+
+    if (!stats.isFile()) {
+      throw new Error('资料路径不是文件')
+    }
+
+    const ext = path.extname(resolvedPath).toLowerCase()
+    const name = path.basename(resolvedPath)
+
+    if (!supportedExtensions.has(ext)) {
+      throw new Error('暂不支持预览该文件类型')
+    }
+
+    if (readableTextExtensions.has(ext)) {
+      const content = await readSmallTextFile(resolvedPath)
+
+      response.json({
+        ok: true,
+        path: resolvedPath,
+        name,
+        ext,
+        type: classifyAsset(ext),
+        content: content.slice(0, 20000),
+      })
+      return
+    }
+
+    if (previewImageExtensions.has(ext)) {
+      if (stats.size > 8 * 1024 * 1024) {
+        throw new Error('图片超过 8MB，请先压缩后再预览')
+      }
+
+      const buffer = await fs.readFile(resolvedPath)
+      const mimeType = imageMimeTypes.get(ext) || 'application/octet-stream'
+
+      response.json({
+        ok: true,
+        path: resolvedPath,
+        name,
+        ext,
+        type: classifyAsset(ext),
+        dataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`,
+      })
+      return
+    }
+
+    response.json({
+      ok: true,
+      path: resolvedPath,
+      name,
+      ext,
+      type: classifyAsset(ext),
+      message: '该文档类型已被搜索命中，但当前版本暂不直接解析预览内容',
+    })
+  } catch (error) {
+    response.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : '资料预览失败',
     })
   }
 })
