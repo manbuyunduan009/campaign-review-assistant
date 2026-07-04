@@ -7,13 +7,15 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f5f4f0;
-        --surface: #fffefa;
-        --panel: #f9f8f3;
-        --line: #dedbd0;
-        --text: #22231f;
-        --muted: #74766e;
-        --ink: #181916;
+        --bg: #f2f1ec;
+        --surface: #fffdf7;
+        --panel: #f8f6ee;
+        --line: #ddd8cb;
+        --line-strong: #beb7a7;
+        --text: #22221f;
+        --muted: #747165;
+        --ink: #171814;
+        --warm: #b88a40;
         --risk: #d97706;
         --danger: #dc2626;
         --ok: #059669;
@@ -26,7 +28,10 @@
 
       body {
         margin: 0;
-        background: var(--bg);
+        background:
+          linear-gradient(90deg, rgba(23, 24, 20, 0.04) 1px, transparent 1px) 0 0 / 56px 56px,
+          linear-gradient(180deg, rgba(23, 24, 20, 0.035) 1px, transparent 1px) 0 0 / 56px 56px,
+          var(--bg);
         color: var(--text);
         font-family:
           ui-sans-serif,
@@ -53,22 +58,26 @@
       }
 
       .topbar,
-      .hero,
+      .command,
       .board,
       .bottom-bar,
       .drawer {
         border: 1px solid var(--line);
         background: var(--surface);
+        box-shadow: 0 12px 30px rgba(32, 30, 24, 0.05);
       }
 
       .topbar {
+        position: sticky;
+        top: 12px;
+        z-index: 5;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        min-height: 58px;
-        padding: 10px 14px;
-        border-radius: 10px;
+        min-height: 62px;
+        padding: 10px 12px;
+        border-radius: 12px;
       }
 
       .brand {
@@ -87,6 +96,7 @@
         background: var(--ink);
         color: #fff;
         font-weight: 700;
+        box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.18);
       }
 
       .brand h1 {
@@ -94,7 +104,6 @@
         font-size: 17px;
       }
 
-      .brand p,
       .muted {
         margin: 0;
         color: var(--muted);
@@ -114,7 +123,7 @@
         min-width: 280px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: var(--panel);
+        background: #fff;
         padding: 8px 10px;
         font-size: 13px;
       }
@@ -140,53 +149,54 @@
         color: #fff;
       }
 
-      .state-tabs {
-        display: flex;
-        gap: 8px;
-        margin: 14px 0;
-      }
-
-      .state-tabs .btn.active {
-        border-color: var(--ink);
-        background: var(--ink);
-        color: #fff;
-      }
-
       .workspace {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 360px;
         gap: 14px;
         align-items: start;
+        margin-top: 14px;
       }
 
       .main {
         min-width: 0;
       }
 
-      .hero {
-        padding: 18px;
-        border-radius: 12px;
+      .command {
+        position: relative;
+        overflow: hidden;
+        padding: 14px;
+        border-radius: 14px;
       }
 
-      .hero-head {
-        display: flex;
-        align-items: flex-start;
+      .command::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background: linear-gradient(90deg, var(--ink), var(--warm), transparent);
+      }
+
+      .command-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
         justify-content: space-between;
         gap: 16px;
-        margin-bottom: 14px;
+        margin-bottom: 10px;
       }
 
-      .hero h2 {
-        margin: 0 0 6px;
-        font-size: 22px;
+      .command h2 {
+        margin: 0;
+        font-size: 18px;
         line-height: 1.25;
       }
 
-      .hero p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.7;
+      .source-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
       }
 
       .input-shell {
@@ -197,18 +207,18 @@
       }
 
       textarea {
-        min-height: 118px;
+        min-height: 104px;
         width: 100%;
         resize: vertical;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: var(--panel);
+        background: #fff;
         padding: 12px;
         outline: none;
         line-height: 1.6;
       }
 
-      .drop-hints {
+      .source-strip {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
@@ -251,13 +261,13 @@
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 10px;
-        margin: 12px 0;
+        margin-top: 10px;
       }
 
       .metric {
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: var(--surface);
+        background: linear-gradient(180deg, #fff, var(--panel));
         padding: 12px;
       }
 
@@ -302,14 +312,23 @@
         gap: 1px;
         margin-top: 14px;
         overflow: hidden;
-        border-radius: 12px;
+        border-radius: 14px;
         background: var(--line);
       }
 
       .lane {
-        min-height: 440px;
+        position: relative;
+        min-height: 520px;
         background: var(--surface);
         padding: 12px;
+      }
+
+      .lane::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 2px;
+        background: linear-gradient(90deg, var(--line-strong), transparent);
       }
 
       .lane-head {
@@ -331,7 +350,7 @@
         margin-bottom: 9px;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: var(--panel);
+        background: #fff;
         padding: 10px;
         text-align: left;
       }
@@ -339,7 +358,7 @@
       .card:hover,
       .card.selected {
         border-color: var(--ink);
-        background: #fff;
+        box-shadow: 0 8px 20px rgba(28, 26, 20, 0.07);
       }
 
       .card-title {
@@ -365,8 +384,8 @@
 
       .drawer {
         position: sticky;
-        top: 18px;
-        min-height: calc(100vh - 36px);
+        top: 92px;
+        min-height: calc(100vh - 110px);
         border-radius: 12px;
         padding: 14px;
       }
@@ -380,7 +399,7 @@
         margin-top: 14px;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: var(--panel);
+        background: #fff;
         padding: 12px;
       }
 
@@ -422,7 +441,7 @@
         margin-top: 14px;
         border-radius: 12px;
         padding: 12px 14px;
-        box-shadow: 0 10px 28px rgba(20, 20, 16, 0.08);
+        box-shadow: 0 16px 36px rgba(20, 20, 16, 0.12);
       }
 
       .bottom-bar strong {
@@ -452,7 +471,7 @@
         display: none;
       }
 
-      .empty .hero {
+      .empty .command {
         min-height: 520px;
         display: grid;
         align-content: center;
@@ -483,7 +502,7 @@
         }
 
         .topbar,
-        .hero-head,
+        .command-head,
         .input-shell,
         .bottom-bar {
           grid-template-columns: 1fr;
@@ -518,7 +537,6 @@
           <div class="mark">验</div>
           <div>
             <h1>专题验收助手</h1>
-            <p>AI review board wireframe</p>
           </div>
         </div>
         <div class="project-switch">
@@ -533,24 +551,19 @@
         </div>
       </header>
 
-      <nav class="state-tabs" aria-label="线框状态切换">
-        <button class="btn" data-state="empty">空状态</button>
-        <button class="btn" data-state="running">验收中</button>
-        <button class="btn active" data-state="result">有结果</button>
-      </nav>
-
       <div class="workspace">
         <main class="main">
-          <section class="hero">
-            <div class="hero-head">
+          <section class="command">
+            <div class="command-head">
               <div>
-                <h2>把验收资料丢进来，AI 自动整理风险看板</h2>
-                <p>
-                  支持页面 URL、设计稿截图、CMS 文案、UE/PRD、本地资料文件夹。
-                  主界面只保留输入、识别、看板和结论，证据按需展开。
-                </p>
+                <h2>剑网3十七周年移动端专题验收</h2>
               </div>
-              <button class="btn primary">开始验收</button>
+              <div class="source-row">
+                <span class="pill">页面 1</span>
+                <span class="pill">资料 6</span>
+                <span class="pill">文案 18</span>
+                <span class="pill">功能 5</span>
+              </div>
             </div>
 
             <div class="input-shell">
@@ -559,15 +572,15 @@ D:\vscode\动效\docs 周年庆 演唱会 购票
 页面右上角要有下载游戏
 购票按钮点击后跳转购票页
 CMS：剑网3十七周年演唱会票正式开售</textarea>
-              <button class="btn primary">分析资料</button>
+              <button class="btn primary">开始验收</button>
             </div>
 
-            <div class="drop-hints">
-              <span class="chip">粘贴 URL</span>
-              <span class="chip">拖入设计稿</span>
-              <span class="chip">粘贴 CMS 文案</span>
-              <span class="chip">粘贴资料文件夹</span>
-              <span class="chip">粘贴 UE/PRD 描述</span>
+            <div class="source-strip">
+              <span class="chip">URL</span>
+              <span class="chip">设计稿</span>
+              <span class="chip">CMS</span>
+              <span class="chip">PRD</span>
+              <span class="chip">本地资料</span>
             </div>
 
             <div class="recognition">
@@ -723,12 +736,12 @@ CMS：剑网3十七周年演唱会票正式开售</textarea>
         <aside class="drawer">
           <div class="drawer-empty">
             <h2>证据抽屉</h2>
-            <p class="summary-text">点击看板卡片后，这里展示截图、OCR、DOM、点测结果和人工确认。</p>
+            <p class="summary-text">选择一个风险项查看证据。</p>
           </div>
 
           <div class="drawer-result">
             <h2 id="drawerTitle">资料预览</h2>
-            <p class="summary-text">抽屉只在需要时出现，避免主界面一开始就堆满截图和表单。</p>
+            <p class="summary-text">PRD、UE、设计稿、CMS 已命中。</p>
 
             <section class="drawer-section">
               <strong>证据截图</strong>
