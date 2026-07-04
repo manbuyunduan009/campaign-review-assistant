@@ -1379,7 +1379,6 @@ function App() {
               copyResult={copyResult}
               actionResults={actionResults}
               issues={issues}
-              finalConclusion={finalConclusion}
               onStatusChange={updateReviewDecisionStatus}
               onNoteChange={updateReviewDecisionNote}
             />
@@ -2564,13 +2563,13 @@ function ProductHero({
     'group inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-3 text-xs font-medium text-white/86 transition hover:border-white/30 hover:bg-white/14 disabled:pointer-events-none disabled:opacity-45'
 
   return (
-    <section className="relative isolate overflow-hidden rounded-2xl border border-[#20231f]/15 bg-[#171914] px-5 py-5 text-white shadow-[0_30px_90px_rgba(28,26,20,0.22)] md:px-7 md:py-6">
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_14%_8%,rgba(216,171,98,0.32),transparent_28%),radial-gradient(circle_at_86%_10%,rgba(78,154,142,0.22),transparent_28%),linear-gradient(135deg,rgba(255,255,255,0.09),transparent_32%)]" />
-      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.16] [background-image:linear-gradient(90deg,#fff_1px,transparent_1px),linear-gradient(180deg,#fff_1px,transparent_1px)] [background-size:38px_38px]" />
+    <section className="relative isolate overflow-hidden rounded-xl border border-border/80 bg-background p-5 text-foreground shadow-[0_16px_42px_rgba(32,30,24,0.07)]">
+      <div className="hidden" />
+      <div className="hidden" />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-6">
         <div className="min-w-0">
-          <div className="mb-5 flex flex-wrap items-center gap-2">
+          <div className="hidden">
             <Badge className="border-white/12 bg-white/10 text-white" variant="outline">
               <Bot className="mr-1 size-3.5" />
               AI Review OS
@@ -2579,23 +2578,23 @@ function ProductHero({
               <MonitorSmartphone className="mr-1 size-3.5" />
               {pageType}
             </Badge>
-            <span className="text-xs text-white/55">展示、内容、功能一次验收</span>
+              <span className="text-xs text-white/55">展示、内容、功能一次验收</span>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_190px]">
             <Input
               value={projectName}
               onChange={(event) => onProjectNameChange(event.target.value)}
-              className="h-11 border-white/16 bg-white/10 text-base text-white placeholder:text-white/40 focus:border-white/35"
+              className="h-11 bg-panel text-base"
               placeholder="项目名称"
             />
             <select
               value={pageType}
               onChange={(event) => onPageTypeChange(event.target.value as PageType)}
-              className="h-11 rounded-md border border-white/16 bg-white/10 px-3 text-sm text-white outline-none focus:border-white/35 focus:ring-2 focus:ring-white/10"
+              className="h-11 rounded-md border border-input bg-panel px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             >
               {pageTypes.map((type) => (
-                <option key={type} value={type} className="bg-[#171914] text-white">
+                <option key={type} value={type}>
                   {type}
                 </option>
               ))}
@@ -2622,7 +2621,7 @@ function ProductHero({
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="hidden">
             <button type="button" className={actionClass} onClick={() => void onCapturePage()} disabled={isCapturing}>
               {isCapturing ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
               采集页面
@@ -2651,14 +2650,14 @@ function ProductHero({
           </div>
 
           {lastMessage ? (
-            <div className="mt-4 flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.07] px-3 py-2 text-xs leading-5 text-white/72">
+            <div className="hidden">
               <Sparkles className="mt-0.5 size-3.5 shrink-0 text-[#d9ad6c]" />
               <span>{compactText(lastMessage)}</span>
             </div>
           ) : null}
         </div>
 
-        <div className="relative hidden min-h-80 overflow-hidden rounded-xl border border-white/10 bg-white/[0.06] xl:block">
+        <div className="hidden">
           <div className="absolute inset-x-5 top-5 flex items-center justify-between text-xs text-white/55">
             <span>Review intelligence</span>
             <span>{new Date().getFullYear()}</span>
@@ -2784,7 +2783,6 @@ function ReviewResultDocument({
   copyResult,
   actionResults,
   issues,
-  finalConclusion,
   onStatusChange,
   onNoteChange,
 }: {
@@ -2793,7 +2791,6 @@ function ReviewResultDocument({
   copyResult: CopyCheckResult | null
   actionResults: ActionCheckItem[]
   issues: ReviewIssue[]
-  finalConclusion: string
   onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
   onNoteChange: (itemId: string, note: string) => void
 }) {
@@ -2835,31 +2832,53 @@ function ReviewResultDocument({
     semanticResult.summary.display.warning + semanticResult.summary.content.warning + semanticResult.summary.function.warning
   const manualCount =
     semanticResult.summary.display.manual + semanticResult.summary.content.manual + semanticResult.summary.function.manual
+  const displayText = summarizeResultParagraph(
+    semanticResult.display,
+    semanticResult.summary.display,
+    '等待页面 URL、设计稿或页面截图。识别完成后会判断关键入口、背景图、首屏结构是否与预期一致。',
+  )
+  const contentText = summarizeResultParagraph(
+    semanticResult.content,
+    semanticResult.summary.content,
+    '等待 CMS 文案、页面 DOM 文本或 OCR 文案。识别完成后会判断业务文案是否缺失或不一致。',
+  )
+  const functionText = summarizeResultParagraph(
+    semanticResult.function,
+    semanticResult.summary.function,
+    '等待 PRD/UE 功能描述或页面可点击元素。识别完成后会判断按钮入口、跳转和弹窗是否符合预期。',
+  )
 
   return (
     <section className="overflow-hidden rounded-xl border border-border/80 bg-background shadow-[0_18px_46px_rgba(32,30,24,0.08)]">
       <div className="border-b border-border bg-[#fbfaf6] px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Review Board</p>
+            <p className="hidden">Review Board</p>
             <h2 className="mt-1 text-xl font-semibold">验收结果</h2>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="hidden">
             <Badge variant={riskCount ? 'warning' : 'success'}>{riskCount} 个问题</Badge>
             <Badge variant={warningCount ? 'warning' : 'success'}>{warningCount} 个风险</Badge>
             <Badge variant={manualCount ? 'outline' : 'success'}>{manualCount} 个待确认</Badge>
           </div>
         </div>
-        {finalConclusion.trim() ? (
-          <p className="mt-3 max-w-4xl text-sm leading-6 text-muted-foreground">{finalConclusion.trim()}</p>
-        ) : (
-          <p className="mt-3 max-w-4xl text-sm leading-6 text-muted-foreground">
-            先完成资料识别，结果会按展示、内容、功能三段直接输出。证据和截图可以在高级细节里展开。
+        <div className="mt-4 space-y-3 text-sm leading-7 text-foreground">
+          <p>
+            <strong>页面展示：</strong>
+            {displayText}
           </p>
-        )}
+          <p>
+            <strong>页面内容：</strong>
+            {contentText}
+          </p>
+          <p>
+            <strong>页面功能：</strong>
+            {functionText}
+          </p>
+        </div>
       </div>
 
-      <div className="divide-y divide-border">
+      <div className="hidden">
         {groups.map((group) => (
           <ResultSection
             key={group.key}
@@ -2876,6 +2895,20 @@ function ReviewResultDocument({
       </div>
     </section>
   )
+}
+
+function summarizeResultParagraph(items: SemanticReviewItem[], summary: SemanticReviewSummary, emptyText: string) {
+  if (!items.length) return emptyText
+
+  const risks = items.filter((item) => item.status !== 'passed').slice(0, 2)
+
+  if (risks.length) {
+    return `${formatGoalStatus(summary)}。重点关注 ${risks
+      .map((item) => `${item.title}，${compactText(item.evidence)}`)
+      .join('；')}。`
+  }
+
+  return `${formatGoalStatus(summary)}。暂未发现明显异常，证据可在高级细节里展开。`
 }
 
 function ResultSection({
@@ -3002,13 +3035,13 @@ function ConclusionDock({
   onDownloadMarkdown: () => void
 }) {
   return (
-    <section className="rounded-xl border border-border/80 bg-[#20231f] p-4 text-white shadow-[0_18px_46px_rgba(32,30,24,0.18)]">
+    <section className="rounded-xl border border-border/80 bg-background p-4 text-foreground shadow-[0_16px_42px_rgba(32,30,24,0.07)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Sparkles className="size-4 text-[#d9ad6c]" />
+            <Sparkles className="size-4 text-[#b7793b]" />
             <h2 className="text-sm font-semibold">AI 结论</h2>
-            <span className="text-xs text-white/50">
+            <span className="text-xs text-muted-foreground">
               问题 {issues.length}，人工通过 {decisionStats.passed}，待确认 {decisionStats.pending}
             </span>
           </div>
@@ -3016,29 +3049,29 @@ function ConclusionDock({
             value={finalConclusion}
             onChange={(event) => onFinalConclusionChange(event.target.value)}
             placeholder="生成或填写最终验收结论，例如：上线前需优先确认下载入口、CMS 缺失文案和预约入口跳转。"
-            className="min-h-24 border-white/14 bg-white/8 text-sm leading-6 text-white placeholder:text-white/38 focus-visible:ring-white/20"
+            className="min-h-24 bg-panel text-sm leading-6 text-foreground placeholder:text-muted-foreground"
           />
-          {smartSummary.trim() ? <p className="mt-2 text-xs leading-5 text-white/52">{compactText(smartSummary)}</p> : null}
+          {smartSummary.trim() ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{compactText(smartSummary)}</p> : null}
         </div>
         <div className="grid content-start gap-2">
-          <Button variant="secondary" onClick={onGenerateConclusion}>
+          <Button variant="outline" onClick={onGenerateConclusion}>
             <ClipboardList />
             生成结论
           </Button>
-          <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onGenerateSmartSummary}>
+          <Button variant="outline" onClick={onGenerateSmartSummary}>
             <Sparkles />
             智能总结
           </Button>
-          <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onToggleAdvanced}>
+          <Button variant="outline" onClick={onToggleAdvanced}>
             <Eye />
             {showAdvancedDetails ? '收起高级细节' : '展开高级细节'}
           </Button>
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onCopyMarkdown}>
+            <Button variant="outline" onClick={onCopyMarkdown}>
               <Copy />
               复制
             </Button>
-            <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onDownloadMarkdown}>
+            <Button onClick={onDownloadMarkdown}>
               <Download />
               导出
             </Button>
