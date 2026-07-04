@@ -3,23 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>专题验收助手 - AI 看板线框</title>
+    <title>专题验收助手 - 极简原型</title>
     <style>
       :root {
         color-scheme: light;
-        --bg: #f2f1ec;
-        --surface: #fffdf7;
-        --panel: #f8f6ee;
-        --line: #ddd8cb;
-        --line-strong: #beb7a7;
-        --text: #22221f;
+        --bg: #f4f2ec;
+        --surface: #fffdf8;
+        --panel: #f9f7f0;
+        --line: #ded9cb;
+        --line-strong: #b9ae99;
+        --text: #1f211d;
         --muted: #747165;
-        --ink: #171814;
-        --warm: #b88a40;
-        --risk: #d97706;
-        --danger: #dc2626;
-        --ok: #059669;
-        --blue: #2563eb;
+        --ink: #151612;
+        --warm: #9a6a2f;
+        --risk: #b45309;
+        --danger: #c02626;
+        --ok: #047857;
       }
 
       * {
@@ -29,8 +28,8 @@
       body {
         margin: 0;
         background:
-          linear-gradient(90deg, rgba(23, 24, 20, 0.04) 1px, transparent 1px) 0 0 / 56px 56px,
-          linear-gradient(180deg, rgba(23, 24, 20, 0.035) 1px, transparent 1px) 0 0 / 56px 56px,
+          linear-gradient(90deg, rgba(21, 22, 18, 0.04) 1px, transparent 1px) 0 0 / 64px 64px,
+          linear-gradient(180deg, rgba(21, 22, 18, 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
           var(--bg);
         color: var(--text);
         font-family:
@@ -57,34 +56,27 @@
         padding: 18px;
       }
 
-      .topbar,
-      .command,
-      .board,
-      .bottom-bar,
-      .drawer {
-        border: 1px solid var(--line);
-        background: var(--surface);
-        box-shadow: 0 12px 30px rgba(32, 30, 24, 0.05);
-      }
-
       .topbar {
         position: sticky;
-        top: 12px;
-        z-index: 5;
+        top: 14px;
+        z-index: 10;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        min-height: 62px;
+        min-height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 253, 248, 0.94);
         padding: 10px 12px;
-        border-radius: 12px;
+        box-shadow: 0 14px 36px rgba(35, 31, 24, 0.08);
+        backdrop-filter: blur(12px);
       }
 
       .brand {
         display: flex;
         align-items: center;
         gap: 10px;
-        min-width: 240px;
       }
 
       .mark {
@@ -92,11 +84,10 @@
         width: 34px;
         height: 34px;
         place-items: center;
-        border-radius: 8px;
+        border-radius: 9px;
         background: var(--ink);
         color: #fff;
-        font-weight: 700;
-        box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.18);
+        font-weight: 800;
       }
 
       .brand h1 {
@@ -104,31 +95,7 @@
         font-size: 17px;
       }
 
-      .muted {
-        margin: 0;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .project-switch {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        flex: 1;
-        min-width: 320px;
-      }
-
-      .project-name {
-        min-width: 280px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: #fff;
-        padding: 8px 10px;
-        font-size: 13px;
-      }
-
-      .actions {
+      .top-actions {
         display: flex;
         gap: 8px;
       }
@@ -149,57 +116,141 @@
         color: #fff;
       }
 
-      .workspace {
+      .layout {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 360px;
+        grid-template-columns: 260px minmax(0, 1fr);
         gap: 14px;
-        align-items: start;
         margin-top: 14px;
       }
 
-      .main {
-        min-width: 0;
+      .sidebar,
+      .workspace {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--surface);
+        box-shadow: 0 12px 30px rgba(35, 31, 24, 0.05);
       }
 
-      .command {
-        position: relative;
-        overflow: hidden;
-        padding: 14px;
-        border-radius: 14px;
+      .sidebar {
+        position: sticky;
+        top: 88px;
+        min-height: calc(100vh - 106px);
+        padding: 12px;
       }
 
-      .command::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 3px;
-        background: linear-gradient(90deg, var(--ink), var(--warm), transparent);
-      }
-
-      .command-head {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+      .side-head {
+        display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .side-head h2,
+      .section-title,
+      .result h2,
+      .chat-title {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .project-title {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        padding: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.5;
+      }
+
+      .file-list {
+        margin-top: 14px;
+      }
+
+      .file-item {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+        border-radius: 10px;
+        padding: 8px;
+      }
+
+      .file-item.active,
+      .file-item:hover {
+        background: var(--panel);
+      }
+
+      .file-icon {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .file-item strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+
+      .muted {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .workspace {
+        min-height: calc(100vh - 106px);
+        padding: 16px;
+      }
+
+      .chat {
+        position: relative;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background:
+          linear-gradient(180deg, rgba(154, 106, 47, 0.08), transparent 70px),
+          var(--panel);
+        padding: 14px;
+      }
+
+      .chat-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
         margin-bottom: 10px;
       }
 
-      .command h2 {
-        margin: 0;
-        font-size: 18px;
-        line-height: 1.25;
-      }
-
-      .source-row {
+      .source-state {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 6px;
       }
 
-      .input-shell {
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        padding: 0 9px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .composer {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 10px;
@@ -207,292 +258,198 @@
       }
 
       textarea {
-        min-height: 104px;
+        min-height: 128px;
         width: 100%;
         resize: vertical;
         border: 1px solid var(--line);
-        border-radius: 10px;
+        border-radius: 12px;
         background: #fff;
         padding: 12px;
         outline: none;
-        line-height: 1.6;
+        line-height: 1.7;
       }
 
-      .source-strip {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 10px;
-      }
-
-      .chip,
-      .status,
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        min-height: 24px;
+      .result {
+        margin-top: 14px;
         border: 1px solid var(--line);
-        border-radius: 999px;
+        border-radius: 16px;
+        background: #fff;
+        overflow: hidden;
+      }
+
+      .result-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        border-bottom: 1px solid var(--line);
+        padding: 16px;
+      }
+
+      .result-title {
+        margin: 0 0 8px;
+        font-size: 20px;
+        line-height: 1.3;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        min-width: 420px;
+      }
+
+      .summary-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
         background: var(--panel);
-        padding: 0 9px;
+        padding: 10px;
+      }
+
+      .summary-item span {
         color: var(--muted);
         font-size: 12px;
       }
 
-      .status.ok {
+      .summary-item strong {
+        display: block;
+        margin-top: 5px;
+        font-size: 18px;
+      }
+
+      .result-body {
+        padding: 4px 16px 16px;
+      }
+
+      .section {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 18px;
+        border-bottom: 1px solid var(--line);
+        padding: 18px 0;
+      }
+
+      .section:last-child {
+        border-bottom: 0;
+      }
+
+      .section-title {
+        position: sticky;
+        top: 96px;
+        align-self: start;
+      }
+
+      .section-title span {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 400;
+      }
+
+      .finding {
+        margin-bottom: 14px;
+      }
+
+      .finding:last-child {
+        margin-bottom: 0;
+      }
+
+      .finding h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 6px;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+
+      .finding p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.75;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .tag.ok {
         border-color: #bbf7d0;
         background: #ecfdf5;
         color: var(--ok);
       }
 
-      .status.risk {
+      .tag.risk {
         border-color: #fed7aa;
         background: #fffbeb;
         color: var(--risk);
       }
 
-      .status.danger {
+      .tag.danger {
         border-color: #fecaca;
         background: #fef2f2;
         color: var(--danger);
       }
 
-      .recognition {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 10px;
+      .evidence {
+        margin-top: 8px;
+        border-left: 2px solid var(--line-strong);
+        padding-left: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.7;
       }
 
-      .metric {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: linear-gradient(180deg, #fff, var(--panel));
-        padding: 12px;
-      }
-
-      .metric strong {
-        display: block;
-        margin-top: 6px;
-        font-size: 20px;
-      }
-
-      .progress-line {
-        position: relative;
-        min-height: 76px;
-        border: 1px dashed var(--line);
-        border-radius: 10px;
-        background: var(--panel);
-        padding: 14px;
-        overflow: hidden;
-      }
-
-      .progress-line::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        width: 42%;
-        background:
-          linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.12), transparent);
-        animation: scan 1.8s infinite;
-      }
-
-      @keyframes scan {
-        from {
-          transform: translateX(-100%);
-        }
-        to {
-          transform: translateX(240%);
-        }
-      }
-
-      .board {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 1px;
-        margin-top: 14px;
-        overflow: hidden;
-        border-radius: 14px;
-        background: var(--line);
-      }
-
-      .lane {
-        position: relative;
-        min-height: 520px;
-        background: var(--surface);
-        padding: 12px;
-      }
-
-      .lane::before {
-        content: "";
-        position: absolute;
-        inset: 0 0 auto;
-        height: 2px;
-        background: linear-gradient(90deg, var(--line-strong), transparent);
-      }
-
-      .lane-head {
+      .actions-bar {
+        position: sticky;
+        bottom: 12px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        min-height: 32px;
-        margin-bottom: 10px;
-      }
-
-      .lane h3 {
-        margin: 0;
-        font-size: 15px;
-      }
-
-      .card {
-        display: block;
-        width: 100%;
-        margin-bottom: 9px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fff;
-        padding: 10px;
-        text-align: left;
-      }
-
-      .card:hover,
-      .card.selected {
-        border-color: var(--ink);
-        box-shadow: 0 8px 20px rgba(28, 26, 20, 0.07);
-      }
-
-      .card-title {
-        margin: 0 0 7px;
-        font-size: 13px;
-        font-weight: 700;
-        line-height: 1.45;
-      }
-
-      .card-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-top: 8px;
-      }
-
-      .evidence-line {
-        margin: 0;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.55;
-      }
-
-      .drawer {
-        position: sticky;
-        top: 92px;
-        min-height: calc(100vh - 110px);
-        border-radius: 12px;
-        padding: 14px;
-      }
-
-      .drawer h2 {
-        margin: 0 0 8px;
-        font-size: 16px;
-      }
-
-      .drawer-section {
+        gap: 14px;
         margin-top: 14px;
         border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fff;
-        padding: 12px;
-      }
-
-      .placeholder-image {
-        display: grid;
-        min-height: 160px;
-        place-items: center;
-        border: 1px dashed var(--line);
-        border-radius: 10px;
-        background: #fff;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .compare {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-      }
-
-      .small-shot {
-        display: grid;
-        min-height: 88px;
-        place-items: center;
-        border: 1px dashed var(--line);
-        border-radius: 8px;
-        background: #fff;
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .bottom-bar {
-        position: sticky;
-        bottom: 12px;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 12px;
-        align-items: center;
-        margin-top: 14px;
-        border-radius: 12px;
+        border-radius: 14px;
+        background: rgba(255, 253, 248, 0.94);
         padding: 12px 14px;
-        box-shadow: 0 16px 36px rgba(20, 20, 16, 0.12);
+        box-shadow: 0 16px 36px rgba(35, 31, 24, 0.12);
+        backdrop-filter: blur(12px);
       }
 
-      .bottom-bar strong {
+      .actions-bar strong {
         display: block;
         margin-bottom: 3px;
         font-size: 14px;
       }
 
-      .summary-text {
-        margin: 0;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.6;
+      .bar-actions {
+        display: flex;
+        gap: 8px;
       }
 
-      .empty .board,
-      .empty .recognition,
-      .empty .bottom-bar,
-      .empty .drawer-result,
-      .running .board-result,
-      .running .drawer-result,
-      .empty .running-board,
-      .result .running-board,
-      .result .progress-line,
-      .result .drawer-empty,
-      .running .drawer-empty {
-        display: none;
-      }
-
-      .empty .command {
-        min-height: 520px;
-        display: grid;
-        align-content: center;
-      }
-
-      .running .board {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-      }
-
-      @media (max-width: 1180px) {
-        .workspace {
+      @media (max-width: 1080px) {
+        .layout {
           grid-template-columns: 1fr;
         }
 
-        .drawer {
+        .sidebar {
           position: static;
           min-height: 0;
         }
 
-        .board {
+        .file-list {
+          display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 6px;
         }
       }
 
@@ -502,71 +459,99 @@
         }
 
         .topbar,
-        .command-head,
-        .input-shell,
-        .bottom-bar {
-          grid-template-columns: 1fr;
+        .result-head,
+        .actions-bar {
           align-items: stretch;
-        }
-
-        .topbar,
-        .project-switch,
-        .actions {
           flex-direction: column;
-          align-items: stretch;
         }
 
-        .project-switch,
-        .project-name {
+        .composer,
+        .summary,
+        .section {
+          grid-template-columns: 1fr;
+        }
+
+        .summary {
           min-width: 0;
-          width: 100%;
         }
 
-        .recognition,
-        .board,
-        .running .board {
+        .file-list {
           grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
-    <div class="app result" id="app">
+    <div class="app">
       <header class="topbar">
         <div class="brand">
           <div class="mark">验</div>
-          <div>
-            <h1>专题验收助手</h1>
-          </div>
+          <h1>专题验收助手</h1>
         </div>
-        <div class="project-switch">
-          <input class="project-name" value="剑网3十七周年移动端专题验收" />
-          <span class="pill">网页移动端</span>
-          <span class="pill">本地项目</span>
-        </div>
-        <div class="actions">
-          <button class="btn">历史</button>
+        <div class="top-actions">
           <button class="btn">保存</button>
           <button class="btn primary">导出报告</button>
         </div>
       </header>
 
-      <div class="workspace">
-        <main class="main">
-          <section class="command">
-            <div class="command-head">
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="side-head">
+            <h2>项目</h2>
+            <button class="btn">新建</button>
+          </div>
+          <div class="project-title">剑网3十七周年移动端专题验收</div>
+
+          <section class="file-list">
+            <div class="file-item active">
+              <div class="file-icon">页</div>
               <div>
-                <h2>剑网3十七周年移动端专题验收</h2>
-              </div>
-              <div class="source-row">
-                <span class="pill">页面 1</span>
-                <span class="pill">资料 6</span>
-                <span class="pill">文案 18</span>
-                <span class="pill">功能 5</span>
+                <strong>活动页 URL</strong>
+                <p class="muted">已采集页面文本和入口</p>
               </div>
             </div>
+            <div class="file-item">
+              <div class="file-icon">图</div>
+              <div>
+                <strong>设计稿截图</strong>
+                <p class="muted">1 张待复核</p>
+              </div>
+            </div>
+            <div class="file-item">
+              <div class="file-icon">文</div>
+              <div>
+                <strong>CMS 文案</strong>
+                <p class="muted">18 条</p>
+              </div>
+            </div>
+            <div class="file-item">
+              <div class="file-icon">需</div>
+              <div>
+                <strong>PRD / UE</strong>
+                <p class="muted">命中 6 个资料</p>
+              </div>
+            </div>
+            <div class="file-item">
+              <div class="file-icon">测</div>
+              <div>
+                <strong>点测截图</strong>
+                <p class="muted">2 组证据</p>
+              </div>
+            </div>
+          </section>
+        </aside>
 
-            <div class="input-shell">
+        <main class="workspace">
+          <section class="chat">
+            <div class="chat-top">
+              <h2 class="chat-title">验收输入</h2>
+              <div class="source-state">
+                <span class="pill">网页移动端</span>
+                <span class="pill">本地项目</span>
+                <span class="pill">6 个风险</span>
+              </div>
+            </div>
+            <div class="composer">
               <textarea>https://test-zt.xoyo.com/jx3.xoyo.com/p/m/2026/07/20/anniversary/#/
 D:\vscode\动效\docs 周年庆 演唱会 购票
 页面右上角要有下载游戏
@@ -574,229 +559,91 @@ D:\vscode\动效\docs 周年庆 演唱会 购票
 CMS：剑网3十七周年演唱会票正式开售</textarea>
               <button class="btn primary">开始验收</button>
             </div>
-
-            <div class="source-strip">
-              <span class="chip">URL</span>
-              <span class="chip">设计稿</span>
-              <span class="chip">CMS</span>
-              <span class="chip">PRD</span>
-              <span class="chip">本地资料</span>
-            </div>
-
-            <div class="recognition">
-              <div class="metric">
-                <span class="muted">页面</span>
-                <strong>1</strong>
-                <span class="status ok">已采集</span>
-              </div>
-              <div class="metric">
-                <span class="muted">资料</span>
-                <strong>6</strong>
-                <span class="status ok">已识别</span>
-              </div>
-              <div class="metric">
-                <span class="muted">文案</span>
-                <strong>18</strong>
-                <span class="status risk">3 条疑似缺失</span>
-              </div>
-              <div class="metric">
-                <span class="muted">功能点</span>
-                <strong>5</strong>
-                <span class="status risk">1 个待复核</span>
-              </div>
-            </div>
-
-            <div class="progress-line">
-              <strong>AI 正在验收</strong>
-              <p class="summary-text">正在采集页面 DOM、读取资料候选、运行 OCR，并准备功能点测。</p>
-            </div>
           </section>
 
-          <section class="board board-result" aria-label="AI 验收看板">
-            <section class="lane">
-              <div class="lane-head">
-                <h3>资料</h3>
-                <span class="status ok">6 个</span>
+          <article class="result">
+            <header class="result-head">
+              <div>
+                <h1 class="result-title">验收结果</h1>
+                <p class="muted">当前建议先处理下载入口、CMS 缺失文案、往返接驳预约入口。</p>
               </div>
-              <button class="card selected" data-detail="资料预览">
-                <p class="card-title">PRD / UE 已命中</p>
-                <p class="evidence-line">README、活动需求、设计截图、CMS 文案。</p>
-                <div class="card-meta">
-                  <span class="chip">可预览</span>
-                  <span class="chip">可引用</span>
+              <div class="summary">
+                <div class="summary-item">
+                  <span>风险</span>
+                  <strong>6</strong>
                 </div>
-              </button>
-              <button class="card" data-detail="设计稿资料">
-                <p class="card-title">设计稿截图</p>
-                <p class="evidence-line">可设为展示证据，进入视觉检查。</p>
-              </button>
-            </section>
-
-            <section class="lane">
-              <div class="lane-head">
-                <h3>展示</h3>
-                <span class="status risk">2 风险</span>
-              </div>
-              <button class="card" data-detail="下载入口">
-                <p class="card-title">右上角下载游戏入口未命中</p>
-                <p class="evidence-line">需求提到右上角入口，页面 DOM 未识别到可点击元素。</p>
-                <div class="card-meta">
-                  <span class="status risk">待确认</span>
+                <div class="summary-item">
+                  <span>需人工确认</span>
+                  <strong>3</strong>
                 </div>
-              </button>
-              <button class="card" data-detail="背景图">
-                <p class="card-title">背景图需人工确认</p>
-                <p class="evidence-line">已找到 CSS 背景，但无法直接判断是否与设计稿一致。</p>
-              </button>
-            </section>
-
-            <section class="lane">
-              <div class="lane-head">
-                <h3>内容</h3>
-                <span class="status danger">3 风险</span>
-              </div>
-              <button class="card" data-detail="CMS 文案">
-                <p class="card-title">3 条 CMS 文案疑似缺失</p>
-                <p class="evidence-line">页面 DOM + OCR 均未完整命中文案。</p>
-                <div class="card-meta">
-                  <span class="status danger">需复核</span>
+                <div class="summary-item">
+                  <span>可通过</span>
+                  <strong>4</strong>
                 </div>
-              </button>
-              <button class="card" data-detail="OCR 修正">
-                <p class="card-title">OCR 已人工修正 1 项</p>
-                <p class="evidence-line">修正后可重新参与 CMS 对比。</p>
-              </button>
-            </section>
-
-            <section class="lane">
-              <div class="lane-head">
-                <h3>功能</h3>
-                <span class="status risk">1 风险</span>
               </div>
-              <button class="card" data-detail="购票点测">
-                <p class="card-title">购票按钮点测通过</p>
-                <p class="evidence-line">点击后 URL 发生变化，符合跳转预期。</p>
-                <div class="card-meta">
-                  <span class="status ok">通过</span>
+            </header>
+
+            <div class="result-body">
+              <section class="section">
+                <h2 class="section-title">页面展示<span>设计稿、截图、模块位置</span></h2>
+                <div>
+                  <div class="finding">
+                    <h3>右上角下载游戏入口未命中 <span class="tag danger">需复核</span></h3>
+                    <p>需求描述中存在右上角下载游戏入口，但页面 DOM、按钮文本、图片 alt 与背景区域均未命中可点击元素。</p>
+                    <div class="evidence">证据：页面文本未包含「下载游戏」；可点击元素未匹配下载相关别名。</div>
+                  </div>
+                  <div class="finding">
+                    <h3>背景图需要人工确认 <span class="tag risk">待确认</span></h3>
+                    <p>页面已识别 CSS 背景和页面截图，但无法直接判断是否与设计稿完全一致，建议人工对照设计稿首屏。</p>
+                    <div class="evidence">证据：已采集页面截图；设计稿资料已命中。</div>
+                  </div>
                 </div>
-              </button>
-              <button class="card" data-detail="接驳预约">
-                <p class="card-title">往返接驳预约未找到入口</p>
-                <p class="evidence-line">需求存在，但页面可点击元素未命中。</p>
-              </button>
-            </section>
+              </section>
 
-            <section class="lane">
-              <div class="lane-head">
-                <h3>问题</h3>
-                <span class="status danger">6 项</span>
-              </div>
-              <button class="card" data-detail="上线阻断">
-                <p class="card-title">上线前优先处理</p>
-                <p class="evidence-line">下载入口、CMS 缺失、预约入口需要人工确认。</p>
-              </button>
-              <button class="card" data-detail="报告草稿">
-                <p class="card-title">报告草稿已生成</p>
-                <p class="evidence-line">可复制 Markdown 或下载归档。</p>
-              </button>
-            </section>
-          </section>
+              <section class="section">
+                <h2 class="section-title">页面内容<span>CMS 文案、OCR、资料摘录</span></h2>
+                <div>
+                  <div class="finding">
+                    <h3>3 条 CMS 文案疑似缺失 <span class="tag danger">需复核</span></h3>
+                    <p>页面 DOM 文本和 OCR 文本均未完整命中部分 CMS 文案，建议先确认是否为图片化文案、滚动区域文案或后台未配置。</p>
+                    <div class="evidence">证据：剑网3十七周年演唱会票正式开售；查看演唱会详情；活动资讯标题。</div>
+                  </div>
+                  <div class="finding">
+                    <h3>OCR 已人工修正 1 项 <span class="tag ok">已处理</span></h3>
+                    <p>修正后的 OCR 文案已重新参与 CMS 对比，可作为图片化文字验收证据。</p>
+                  </div>
+                </div>
+              </section>
 
-          <section class="board running-board">
-            <section class="lane">
-              <div class="lane-head"><h3>读取资料</h3><span class="status ok">完成</span></div>
-              <div class="card"><p class="card-title">扫描文件夹</p><p class="evidence-line">已命中 PRD、UE、设计稿、CMS 资料。</p></div>
-            </section>
-            <section class="lane">
-              <div class="lane-head"><h3>采集页面</h3><span class="status ok">完成</span></div>
-              <div class="card"><p class="card-title">移动端截图</p><p class="evidence-line">已提取 DOM 文本、按钮、图片和背景。</p></div>
-            </section>
-            <section class="lane">
-              <div class="lane-head"><h3>识别内容</h3><span class="status risk">进行中</span></div>
-              <div class="card"><p class="card-title">OCR + CMS 对比</p><p class="evidence-line">正在合并页面文本和图片文字。</p></div>
-            </section>
-            <section class="lane">
-              <div class="lane-head"><h3>功能点测</h3><span class="status">等待</span></div>
-              <div class="card"><p class="card-title">点击核心入口</p><p class="evidence-line">将记录点击前后截图和失败原因。</p></div>
-            </section>
-          </section>
+              <section class="section">
+                <h2 class="section-title">页面功能<span>按钮、跳转、弹窗、状态</span></h2>
+                <div>
+                  <div class="finding">
+                    <h3>购票按钮点测通过 <span class="tag ok">通过</span></h3>
+                    <p>点击后 URL 发生变化，符合跳转购票页的预期。</p>
+                    <div class="evidence">证据：点测前后 URL 不一致；页面文本发生变化。</div>
+                  </div>
+                  <div class="finding">
+                    <h3>往返接驳预约未找到入口 <span class="tag risk">待确认</span></h3>
+                    <p>需求存在该功能，但页面可点击元素未命中对应入口。建议确认该功能是否尚未配置、隐藏在二级弹窗或依赖登录态。</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </article>
 
-          <section class="bottom-bar">
+          <section class="actions-bar">
             <div>
-              <strong>AI 结论：当前 6 个风险，建议先处理 3 个上线阻断项</strong>
-              <p class="summary-text">重点复核下载入口、CMS 缺失文案、往返接驳预约入口；其余问题可人工标记后进入报告。</p>
+              <strong>结论：不建议直接通过</strong>
+              <p class="muted">先复核 3 个上线阻断项，其余问题可人工标记后进入报告。</p>
             </div>
-            <div class="actions">
+            <div class="bar-actions">
               <button class="btn">人工确认</button>
               <button class="btn primary">生成报告</button>
             </div>
           </section>
         </main>
-
-        <aside class="drawer">
-          <div class="drawer-empty">
-            <h2>证据抽屉</h2>
-            <p class="summary-text">选择一个风险项查看证据。</p>
-          </div>
-
-          <div class="drawer-result">
-            <h2 id="drawerTitle">资料预览</h2>
-            <p class="summary-text">PRD、UE、设计稿、CMS 已命中。</p>
-
-            <section class="drawer-section">
-              <strong>证据截图</strong>
-              <div class="placeholder-image">设计稿 / 页面截图预览</div>
-            </section>
-
-            <section class="drawer-section">
-              <strong>点测截图</strong>
-              <div class="compare">
-                <div class="small-shot">点击前</div>
-                <div class="small-shot">点击后</div>
-              </div>
-            </section>
-
-            <section class="drawer-section">
-              <strong>文字证据</strong>
-              <p class="summary-text">DOM 文本：剑网3十七周年演唱会票正式开售</p>
-              <p class="summary-text">OCR 修正：演唱会、购票、查看详情</p>
-            </section>
-
-            <section class="drawer-section">
-              <strong>人工确认</strong>
-              <div class="drop-hints">
-                <span class="chip">通过</span>
-                <span class="chip">需修改</span>
-                <span class="chip">待确认</span>
-                <span class="chip">忽略</span>
-              </div>
-            </section>
-          </div>
-        </aside>
       </div>
     </div>
-
-    <script>
-      const app = document.querySelector("#app")
-      const stateButtons = Array.from(document.querySelectorAll("[data-state]"))
-      const cards = Array.from(document.querySelectorAll("[data-detail]"))
-      const drawerTitle = document.querySelector("#drawerTitle")
-
-      stateButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-          stateButtons.forEach((item) => item.classList.remove("active"))
-          button.classList.add("active")
-          app.className = `app ${button.dataset.state}`
-        })
-      })
-
-      cards.forEach((card) => {
-        card.addEventListener("click", () => {
-          cards.forEach((item) => item.classList.remove("selected"))
-          card.classList.add("selected")
-          drawerTitle.textContent = card.dataset.detail
-        })
-      })
-    </script>
   </body>
 </html>
