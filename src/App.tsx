@@ -1,0 +1,1855 @@
+import type { ChangeEvent, ReactNode } from 'react'
+import { useMemo, useState } from 'react'
+import {
+  Bot,
+  Camera,
+  ClipboardList,
+  Eye,
+  FileImage,
+  FileText,
+  FolderOpen,
+  Link2,
+  Loader2,
+  MonitorSmartphone,
+  MousePointerClick,
+  Paperclip,
+  Search,
+  Send,
+  ShieldCheck,
+  ScanText,
+  Upload,
+} from 'lucide-react'
+import { Badge } from './components/ui/badge'
+import { Button } from './components/ui/button'
+import { Input } from './components/ui/input'
+import { Textarea } from './components/ui/textarea'
+import type { PageType, ReviewIssue } from './types'
+
+const captureEndpoint = 'http://127.0.0.1:4317/api/capture'
+const searchFolderEndpoint = 'http://127.0.0.1:4317/api/search-folder'
+const ocrEndpoint = 'http://127.0.0.1:4317/api/ocr'
+const actionCheckEndpoint = 'http://127.0.0.1:4317/api/check-actions'
+const pageTypes: PageType[] = ['网页移动端', '小程序', '游戏内嵌页', '网吧内嵌页']
+const knownBusinessTerms = [
+  '下载游戏',
+  '立即下载',
+  '预约',
+  '立即预约',
+  '购票',
+  '查看详情',
+  '查看更多',
+  '领取',
+  '兑换',
+  '绑定',
+  '登录',
+  '分享',
+  '返回',
+  '关闭',
+  '抽奖',
+  '报名',
+  '导航',
+  '公告',
+  '活动资讯',
+  '演唱会',
+  '游园会',
+  '服务导航',
+  '背景',
+  '主视觉',
+]
+const functionIntentPattern = /点击|按钮|入口|跳转|打开|弹窗|关闭|链接|功能|交互|领取|预约|购票|下载|登录|绑定|分享|抽奖|提交/
+const copyIntentPattern = /文案|CMS|业务方|标题|公告|说明|按钮文案|活动资讯/
+
+interface DomBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface PageElement {
+  tag: string
+  role: string
+  text: string
+  href: string
+  hasClickHandler: boolean
+  selector: string
+  box: DomBox
+}
+
+interface PageImage {
+  src: string
+  alt: string
+  selector: string
+  box: DomBox
+}
+
+interface PageBackground {
+  urls: string[]
+  text: string
+  selector: string
+  box: DomBox
+}
+
+interface CaptureMeta {
+  title: string
+  width: number
+  height: number
+  viewportWidth: number
+  viewportHeight: number
+  textSample: string
+  interactiveElements: PageElement[]
+  images: PageImage[]
+  backgroundImages: PageBackground[]
+  capturedAt: string
+  durationMs: number
+}
+
+interface CaptureResponse {
+  ok: boolean
+  image?: string
+  meta?: CaptureMeta
+  message?: string
+}
+
+interface DiffStats {
+  width: number
+  height: number
+  diffPixels: number
+  totalPixels: number
+  ratio: number
+  threshold: number
+}
+
+interface CopyCheckItem {
+  source: string
+  normalized: string
+  status: 'matched' | 'missing'
+}
+
+interface CopyCheckResult {
+  checkedAt: string
+  pageTextLength: number
+  total: number
+  matched: CopyCheckItem[]
+  missing: CopyCheckItem[]
+  ignored: string[]
+}
+
+interface FolderAsset {
+  path: string
+  relativePath: string
+  name: string
+  ext: string
+  type: 'image' | 'text' | 'document' | 'file'
+  score: number
+  snippet: string
+}
+
+interface FolderSearchResponse {
+  ok: boolean
+  root?: string
+  total?: number
+  results?: FolderAsset[]
+  message?: string
+}
+
+interface OcrItem {
+  id: string
+  label: string
+  text: string
+  confidence: number
+}
+
+interface OcrResponse {
+  ok: boolean
+  results?: OcrItem[]
+  durationMs?: number
+  message?: string
+}
+
+interface ActionCheckItem {
+  term: string
+  status: 'passed' | 'warning' | 'manual'
+  title: string
+  evidence: string
+}
+
+interface ActionCheckResponse {
+  ok: boolean
+  results?: ActionCheckItem[]
+  durationMs?: number
+  message?: string
+}
+
+interface ChatMessage {
+  id: number
+  role: 'assistant' | 'user'
+  text: string
+}
+
+type SemanticCategory = 'display' | 'content' | 'function'
+type SemanticStatus = 'passed' | 'warning' | 'manual'
+
+interface SemanticReviewItem {
+  id: string
+  category: SemanticCategory
+  title: string
+  source: string
+  status: SemanticStatus
+  evidence: string
+}
+
+interface SemanticReviewSummary {
+  total: number
+  passed: number
+  warning: number
+  manual: number
+}
+
+interface SemanticReviewResult {
+  display: SemanticReviewItem[]
+  content: SemanticReviewItem[]
+  function: SemanticReviewItem[]
+  summary: Record<SemanticCategory, SemanticReviewSummary>
+}
+
+interface BuildSemanticReviewInput {
+  meta: CaptureMeta | null
+  sourceText: string
+  ocrText: string
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  copyResult: CopyCheckResult | null
+  diffStats: DiffStats | null
+  hasDesign: boolean
+  hasActual: boolean
+  folderAssets: FolderAsset[]
+}
+
+const baseIssues: ReviewIssue[] = [
+  {
+    id: 1,
+    type: '模块',
+    title: '页面状态需确认',
+    location: '首屏 / 路由',
+    severity: '高',
+    status: '待确认',
+  },
+  {
+    id: 2,
+    type: '文案',
+    title: '图片化文案需 OCR',
+    location: '页面截图',
+    severity: '中',
+    status: '未确认',
+  },
+  {
+    id: 3,
+    type: '交互',
+    title: '功能点击需对照需求/UE',
+    location: '需求文档 / UE 描述',
+    severity: '中',
+    status: '未确认',
+  },
+]
+
+function App() {
+  const [pageType, setPageType] = useState<PageType>('网页移动端')
+  const [url, setUrl] = useState(
+    'https://test-zt.xoyo.com/jx3.xoyo.com/p/m/2026/07/20/anniversary/#/',
+  )
+  const [designPreview, setDesignPreview] = useState('')
+  const [actualPreview, setActualPreview] = useState('')
+  const [diffPreview, setDiffPreview] = useState('')
+  const [isCapturing, setIsCapturing] = useState(false)
+  const [isDiffing, setIsDiffing] = useState(false)
+  const [isSearchingFolder, setIsSearchingFolder] = useState(false)
+  const [isRunningOcr, setIsRunningOcr] = useState(false)
+  const [isTestingActions, setIsTestingActions] = useState(false)
+  const [captureError, setCaptureError] = useState('')
+  const [diffError, setDiffError] = useState('')
+  const [copyError, setCopyError] = useState('')
+  const [folderError, setFolderError] = useState('')
+  const [ocrError, setOcrError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [captureMeta, setCaptureMeta] = useState<CaptureMeta | null>(null)
+  const [diffStats, setDiffStats] = useState<DiffStats | null>(null)
+  const [cmsText, setCmsText] = useState('')
+  const [copyResult, setCopyResult] = useState<CopyCheckResult | null>(null)
+  const [ocrResults, setOcrResults] = useState<OcrItem[]>([])
+  const [actionResults, setActionResults] = useState<ActionCheckItem[]>([])
+  const [folderPath, setFolderPath] = useState('D:\\vscode\\动效\\docs')
+  const [folderQuery, setFolderQuery] = useState('周年庆 预约 演唱会')
+  const [folderAssets, setFolderAssets] = useState<FolderAsset[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 1,
+      role: 'assistant',
+      text: '把页面 URL、资料文件夹地址、CMS 文案、需求或 UE 描述丢给我。我会按展示、内容、功能三部分整理验收线索。',
+    },
+  ])
+
+  const semanticResult = useMemo(
+    () =>
+      buildSemanticReview({
+        meta: captureMeta,
+        sourceText: cmsText,
+        ocrText: collectOcrText(ocrResults),
+        ocrResults,
+        actionResults,
+        copyResult,
+        diffStats,
+        hasDesign: Boolean(designPreview),
+        hasActual: Boolean(actualPreview),
+        folderAssets,
+      }),
+    [actionResults, captureMeta, cmsText, copyResult, designPreview, diffStats, actualPreview, folderAssets, ocrResults],
+  )
+
+  const issues = useMemo(() => {
+    const generatedIssues: ReviewIssue[] = []
+    const semanticWarnings = [
+      ...semanticResult.display,
+      ...semanticResult.content,
+      ...semanticResult.function,
+    ].filter((item) => item.status === 'warning')
+
+    if (diffStats) {
+      generatedIssues.push({
+        id: 4,
+        type: '视觉',
+        title: '视觉参考图已生成',
+        location: '设计稿 vs 页面截图',
+        severity: diffStats.ratio > 0.2 ? '中' : '低',
+        status: '待确认',
+      })
+    }
+
+    if (folderAssets.length) {
+      generatedIssues.push({
+        id: 6,
+        type: '交互',
+        title: `已找到 ${folderAssets.length} 个相关资料`,
+        location: '本地资料库',
+        severity: '低',
+        status: '待确认',
+      })
+    }
+
+    semanticWarnings.slice(0, 6).forEach((item, index) => {
+      generatedIssues.push({
+        id: 20 + index,
+        type:
+          item.category === 'content' ? '文案' : item.category === 'function' ? '交互' : '模块',
+        title: item.title,
+        location: item.evidence,
+        severity: item.category === 'content' || item.category === 'function' ? '高' : '中',
+        status: '待确认',
+      })
+    })
+
+    return [...generatedIssues, ...baseIssues]
+  }, [diffStats, folderAssets.length, semanticResult])
+
+  const report = useMemo(
+    () =>
+      [
+        '验收目标：页面展示、页面内容、页面功能三部分辅助检查。',
+        `页面类型：${pageType}`,
+        `页面 URL：${url || '未填写'}`,
+        captureMeta
+          ? `页面截图：${captureMeta.title || '无标题'} / ${captureMeta.width} x ${captureMeta.height}`
+          : '页面截图：未采集',
+        designPreview ? '设计稿：已上传' : '设计稿：未上传',
+        diffStats ? '展示一致性：已生成视觉参考图，需人工确认关键模块/入口/背景' : '展示一致性：未生成视觉参考',
+        copyResult
+          ? `业务文案：匹配 ${copyResult.matched.length} 条，缺失 ${copyResult.missing.length} 条`
+          : '业务文案：未对比',
+        folderAssets.length
+          ? `需求/UE 资料：找到 ${folderAssets.length} 个候选资料`
+          : '需求/UE 资料：未搜索',
+        ocrResults.length
+          ? `图片 OCR：识别 ${ocrResults.length} 张图，文本 ${collectOcrText(ocrResults).length} 字`
+          : '图片 OCR：未识别',
+        actionResults.length
+          ? `功能点测：通过 ${actionResults.filter((item) => item.status === 'passed').length} 项，风险 ${actionResults.filter((item) => item.status === 'warning').length} 项`
+          : '功能点测：未运行',
+        `展示检查：${formatSemanticSummary(semanticResult.summary.display)}`,
+        `内容检查：${formatSemanticSummary(semanticResult.summary.content)}`,
+        `功能检查：${formatSemanticSummary(semanticResult.summary.function)}`,
+      ].join('\n'),
+    [actionResults, captureMeta, copyResult, designPreview, diffStats, folderAssets.length, ocrResults, pageType, semanticResult, url],
+  )
+
+  function addMessage(role: ChatMessage['role'], text: string) {
+    setMessages((current) => [
+      ...current,
+      {
+        id: Date.now() + Math.random(),
+        role,
+        text,
+      },
+    ])
+  }
+
+  function handlePreview(
+    event: ChangeEvent<HTMLInputElement>,
+    setter: (value: string) => void,
+    ocrId: 'design' | 'actual',
+  ) {
+    const file = event.target.files?.[0]
+
+    if (!file) return
+
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      setter(String(reader.result || ''))
+      setDiffPreview('')
+      setDiffStats(null)
+      setOcrResults((current) => current.filter((item) => item.id !== ocrId))
+    }
+    reader.readAsDataURL(file)
+  }
+
+  async function submitChat() {
+    const text = chatInput.trim()
+
+    if (!text) return
+
+    setChatInput('')
+    addMessage('user', text)
+
+    const nextUrl = extractUrl(text)
+    const nextFolder = extractWindowsPath(text)
+    const remainingText = stripKnownInputs(text, [nextUrl, nextFolder])
+    const nextQuery = remainingText || folderQuery
+
+    if (nextUrl) {
+      setUrl(nextUrl)
+      addMessage('assistant', `已识别页面 URL：${nextUrl}。我开始自动截图。`)
+    }
+
+    if (nextFolder) {
+      setFolderPath(nextFolder)
+      if (remainingText) {
+        setFolderQuery(remainingText)
+      }
+      addMessage('assistant', `已识别资料文件夹：${nextFolder}。我开始搜索相关设计稿、需求和 UE 资料。`)
+      await searchFolder(nextFolder, nextQuery)
+    }
+
+    if (remainingText) {
+      setCmsText(remainingText)
+      setCopyResult(null)
+      setActionResults([])
+      addMessage('assistant', '已把剩余文本作为 CMS/业务方文案或需求/UE 描述候选。')
+    }
+
+    if (nextUrl) {
+      await capturePage(nextUrl, remainingText || cmsText)
+      return
+    }
+
+    if (!nextUrl && !nextFolder && remainingText) {
+      if (captureMeta?.textSample) {
+        runCopyComparison(remainingText, captureMeta.textSample)
+      } else {
+        addMessage('assistant', '还没有页面截图文本。请先丢页面 URL，或点击自动截图后我再对比文案。')
+      }
+    }
+  }
+
+  async function capturePage(targetUrl = url, copyText = cmsText) {
+    setIsCapturing(true)
+    setCaptureError('')
+
+    try {
+      const response = await fetch(captureEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: targetUrl,
+          viewport: { width: 390, height: 844 },
+          waitMs: 5000,
+        }),
+      })
+      const data = (await response.json()) as CaptureResponse
+
+      if (!response.ok || !data.ok || !data.image) {
+        throw new Error(data.message || '截图失败')
+      }
+
+      setActualPreview(`data:image/png;base64,${data.image}`)
+      setCaptureMeta(data.meta || null)
+      setCopyResult(null)
+      setOcrResults((current) => current.filter((item) => item.id !== 'actual'))
+      setActionResults([])
+      setDiffPreview('')
+      setDiffStats(null)
+      addMessage('assistant', `页面截图已采集：${data.meta?.title || '无标题'}。`)
+
+      if (copyText.trim() && data.meta?.textSample) {
+        runCopyComparison(
+          copyText,
+          getPageComparisonText(
+            data.meta,
+            collectOcrText(ocrResults.filter((item) => item.id !== 'actual')),
+          ),
+        )
+      }
+
+      return data.meta || null
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : '截图失败')
+      return null
+    } finally {
+      setIsCapturing(false)
+    }
+  }
+
+  async function generateDiff() {
+    setIsDiffing(true)
+    setDiffError('')
+
+    try {
+      if (!designPreview || !actualPreview) {
+        throw new Error('请先上传设计稿截图，并采集或上传实际页面截图')
+      }
+
+      const result = await createVisualDiff(designPreview, actualPreview)
+
+      setDiffPreview(result.image)
+      setDiffStats(result.stats)
+      addMessage('assistant', '视觉参考图已生成。它只用于辅助确认关键模块、入口、背景是否明显不一致。')
+    } catch (error) {
+      setDiffError(error instanceof Error ? error.message : '生成视觉参考失败')
+    } finally {
+      setIsDiffing(false)
+    }
+  }
+
+  function compareCmsCopy() {
+    setCopyError('')
+
+    try {
+      if (!cmsText.trim()) {
+        throw new Error('请先粘贴 CMS 文档文案')
+      }
+
+      if (!captureMeta?.textSample?.trim()) {
+        throw new Error('请先点击自动截图，获取页面 DOM 文本后再对比')
+      }
+
+      runCopyComparison(cmsText, getPageComparisonText(captureMeta, collectOcrText(ocrResults)))
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : '文案对比失败')
+    }
+  }
+
+  function runCopyComparison(sourceText: string, pageText: string) {
+    const result = compareCopy(sourceText, pageText)
+
+    setCopyResult(result)
+    addMessage('assistant', `文案对比完成：匹配 ${result.matched.length} 条，缺失 ${result.missing.length} 条。`)
+
+    return result
+  }
+
+  async function runImageOcr() {
+    setIsRunningOcr(true)
+    setOcrError('')
+
+    try {
+      const images = [
+        designPreview ? { id: 'design', label: '设计稿', image: designPreview } : null,
+        actualPreview ? { id: 'actual', label: '页面截图', image: actualPreview } : null,
+      ].filter(Boolean)
+
+      if (!images.length) {
+        throw new Error('请先上传设计稿或采集页面截图')
+      }
+
+      const response = await fetch(ocrEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: 'chi_sim+eng', images }),
+      })
+      const data = (await response.json()) as OcrResponse
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'OCR 识别失败')
+      }
+
+      const results = data.results || []
+
+      setOcrResults(results)
+      addMessage('assistant', `图片 OCR 完成：识别 ${results.length} 张图。`)
+
+      if (cmsText.trim() && captureMeta?.textSample) {
+        runCopyComparison(cmsText, getPageComparisonText(captureMeta, collectOcrText(results)))
+      }
+    } catch (error) {
+      setOcrError(error instanceof Error ? error.message : 'OCR 识别失败')
+    } finally {
+      setIsRunningOcr(false)
+    }
+  }
+
+  async function runActionCheck() {
+    setIsTestingActions(true)
+    setActionError('')
+
+    try {
+      if (!url.trim()) {
+        throw new Error('请先填写页面 URL')
+      }
+
+      const expectations = extractFunctionTerms(cmsText)
+
+      if (!expectations.length) {
+        throw new Error('请先粘贴需求或 UE 功能描述，例如“购票按钮点击后跳转购票页”')
+      }
+
+      const response = await fetch(actionCheckEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, expectations, waitMs: 4000 }),
+      })
+      const data = (await response.json()) as ActionCheckResponse
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || '功能点测失败')
+      }
+
+      const results = data.results || []
+
+      setActionResults(results)
+      addMessage(
+        'assistant',
+        `功能点测完成：通过 ${results.filter((item) => item.status === 'passed').length} 项，风险 ${results.filter((item) => item.status === 'warning').length} 项。`,
+      )
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '功能点测失败')
+    } finally {
+      setIsTestingActions(false)
+    }
+  }
+
+  async function searchFolder(targetPath = folderPath, query = folderQuery) {
+    setIsSearchingFolder(true)
+    setFolderError('')
+
+    try {
+      const response = await fetch(searchFolderEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: targetPath, query }),
+      })
+      const data = (await response.json()) as FolderSearchResponse
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || '资料搜索失败')
+      }
+
+      setFolderAssets(data.results || [])
+      addMessage('assistant', `资料搜索完成：扫描 ${data.total || 0} 个文件，命中 ${(data.results || []).length} 个候选资料。`)
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : '资料搜索失败')
+    } finally {
+      setIsSearchingFolder(false)
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-canvas text-foreground">
+      <header className="border-b border-border bg-background">
+        <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-md bg-ink text-white">
+              <ShieldCheck className="size-5" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold tracking-normal">专题验收助手</h1>
+              <p className="text-sm text-muted-foreground">campaign-review-assistant</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="success">展示</Badge>
+            <Badge variant="warning">内容</Badge>
+            <Badge variant="outline">功能</Badge>
+          </div>
+        </div>
+      </header>
+
+      <section className="mx-auto grid max-w-[1440px] gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-background shadow-sm">
+            <div className="border-b border-border px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Bot className="size-4" />
+                验收对话
+              </div>
+            </div>
+            <div className="max-h-56 space-y-3 overflow-auto p-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={message.role === 'user' ? 'ml-auto max-w-[78%]' : 'mr-auto max-w-[82%]'}
+                >
+                  <div
+                    className={
+                      message.role === 'user'
+                        ? 'rounded-md bg-ink px-3 py-2 text-sm text-white'
+                        : 'rounded-md border border-border bg-panel px-3 py-2 text-sm'
+                    }
+                  >
+                    {message.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-border p-4">
+              <Textarea
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="粘贴页面 URL、资料文件夹地址、CMS 文案、需求或 UE 描述..."
+                className="min-h-24"
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button onClick={submitChat}>
+                  <Send />
+                  发送
+                </Button>
+                <Button variant="outline" onClick={() => capturePage()} disabled={isCapturing || !url}>
+                  {isCapturing ? <Loader2 className="animate-spin" /> : <Camera />}
+                  自动截图
+                </Button>
+                <Button variant="outline" asChild>
+                  <label>
+                    <Paperclip />
+                    上传设计稿
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="sr-only"
+                      onChange={(event) => handlePreview(event, setDesignPreview, 'design')}
+                    />
+                  </label>
+                </Button>
+                <Button variant="outline" onClick={compareCmsCopy} disabled={!cmsText.trim() || !captureMeta?.textSample}>
+                  <FileText />
+                  对比文案
+                </Button>
+                <Button variant="outline" onClick={runImageOcr} disabled={isRunningOcr || (!designPreview && !actualPreview)}>
+                  {isRunningOcr ? <Loader2 className="animate-spin" /> : <ScanText />}
+                  图片 OCR
+                </Button>
+                <Button variant="outline" onClick={runActionCheck} disabled={isTestingActions || !url || !cmsText.trim()}>
+                  {isTestingActions ? <Loader2 className="animate-spin" /> : <MousePointerClick />}
+                  点测功能
+                </Button>
+                <Button variant="outline" onClick={generateDiff} disabled={isDiffing || !designPreview || !actualPreview}>
+                  {isDiffing ? <Loader2 className="animate-spin" /> : <Eye />}
+                  视觉参考
+                </Button>
+              </div>
+              <InlineErrors errors={[captureError, copyError, ocrError, actionError, diffError, folderError]} />
+            </div>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-3">
+            <ReviewGoalCard
+              icon={<MonitorSmartphone />}
+              title="页面展示"
+              desc="设计稿、页面截图、背景图、关键入口和模块是否一致。"
+              status={formatGoalStatus(semanticResult.summary.display)}
+            />
+            <ReviewGoalCard
+              icon={<FileText />}
+              title="页面内容"
+              desc="CMS/业务方文案与页面展示文案是否一致。"
+              status={formatGoalStatus(semanticResult.summary.content)}
+            />
+            <ReviewGoalCard
+              icon={<ClipboardList />}
+              title="页面功能"
+              desc="按钮、跳转、弹窗、状态是否符合需求文档和 UE 描述。"
+              status={formatGoalStatus(semanticResult.summary.function)}
+            />
+          </section>
+
+          <SemanticChecksPanel result={semanticResult} />
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <EvidencePanel
+              designPreview={designPreview}
+              actualPreview={actualPreview}
+              diffPreview={diffPreview}
+              diffStats={diffStats}
+              pageType={pageType}
+              onPageTypeChange={setPageType}
+              url={url}
+              onUrlChange={setUrl}
+              onDesignUpload={(event) => handlePreview(event, setDesignPreview, 'design')}
+              onActualUpload={(event) => handlePreview(event, setActualPreview, 'actual')}
+            />
+            <ContentAndFolderPanel
+              cmsText={cmsText}
+              onCmsTextChange={(value) => {
+                setCmsText(value)
+                setCopyResult(null)
+              }}
+              copyResult={copyResult}
+              ocrResults={ocrResults}
+              actionResults={actionResults}
+              folderPath={folderPath}
+              folderQuery={folderQuery}
+              folderAssets={folderAssets}
+              isSearchingFolder={isSearchingFolder}
+              onFolderPathChange={setFolderPath}
+              onFolderQueryChange={setFolderQuery}
+              onSearchFolder={() => searchFolder()}
+            />
+          </section>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">问题清单</h2>
+              <Badge variant="danger">{issues.length} 项</Badge>
+            </div>
+            <div className="space-y-2">
+              {issues.map((issue) => (
+                <IssueRow key={issue.id} issue={issue} />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+            <div className="mb-3 flex items-center gap-2">
+              <ClipboardList className="size-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">验收摘要</h2>
+            </div>
+            <Textarea value={report} readOnly className="min-h-64 font-mono text-xs" />
+          </section>
+        </aside>
+      </section>
+    </main>
+  )
+}
+
+function extractUrl(value: string) {
+  return value.match(/https?:\/\/[^\s"'，。]+/)?.[0] || ''
+}
+
+function extractWindowsPath(value: string) {
+  return (
+    value.match(/["“]([a-zA-Z]:\\[^"”<>|]+)["”]/)?.[1]?.trim() ||
+    value.match(/[a-zA-Z]:\\[^\s"'<>|]+/)?.[0]?.trim() ||
+    ''
+  )
+}
+
+function stripKnownInputs(value: string, inputs: string[]) {
+  return inputs
+    .filter(Boolean)
+    .reduce((current, input) => current.replace(input, ''), value)
+    .trim()
+}
+
+function collectOcrText(results: OcrItem[]) {
+  return results.map((item) => item.text).filter(Boolean).join('\n')
+}
+
+function getPageComparisonText(meta: CaptureMeta | null, ocrText: string) {
+  return [meta?.textSample || '', ocrText].filter(Boolean).join('\n')
+}
+
+function compactText(value: string) {
+  const text = value.replace(/\s+/g, ' ').trim()
+
+  if (text.length <= 120) return text
+
+  return `${text.slice(0, 120)}...`
+}
+
+function buildSemanticReview(input: BuildSemanticReviewInput): SemanticReviewResult {
+  const display: SemanticReviewItem[] = []
+  const content: SemanticReviewItem[] = []
+  const functionChecks: SemanticReviewItem[] = []
+  const lines = extractReviewLines(input.sourceText)
+  const terms = extractExpectationTerms(input.sourceText)
+  const meta = input.meta
+    ? {
+        ...input.meta,
+        interactiveElements: input.meta.interactiveElements || [],
+        images: input.meta.images || [],
+        backgroundImages: input.meta.backgroundImages || [],
+      }
+    : null
+  const pageComparisonText = getPageComparisonText(meta, input.ocrText)
+  const activeCopyResult =
+    input.copyResult ||
+    (meta?.textSample && input.sourceText.trim()
+      ? compareCopy(input.sourceText, pageComparisonText)
+      : null)
+
+  if (!meta) {
+    addSemanticItem(
+      display,
+      'display',
+      '等待页面截图',
+      '页面 URL',
+      'manual',
+      '先粘贴 URL 或点击自动截图',
+    )
+    addSemanticItem(
+      content,
+      'content',
+      '等待页面 DOM 文本',
+      'CMS / 业务方文案',
+      'manual',
+      '截图后才能对比页面实际展示文本',
+    )
+    addSemanticItem(
+      functionChecks,
+      'function',
+      '等待页面交互证据',
+      '需求 / UE 描述',
+      'manual',
+      '截图后才能识别按钮、链接和点击入口',
+    )
+
+    return withSemanticSummary(display, content, functionChecks)
+  }
+
+  addSemanticItem(
+    display,
+    'display',
+    '页面已成功采集',
+    meta.title || '页面截图',
+    'passed',
+    `${meta.width} x ${meta.height}，首屏 ${meta.viewportWidth} x ${meta.viewportHeight}`,
+  )
+
+  addSemanticItem(
+    display,
+    'display',
+    input.hasDesign && input.hasActual ? '设计稿和页面截图已就绪' : '设计稿或页面截图不完整',
+    '设计稿 vs 页面截图',
+    input.hasDesign && input.hasActual ? 'manual' : 'warning',
+    input.hasDesign && input.hasActual
+      ? '可继续人工确认关键模块、入口、背景是否一致'
+      : '上传设计稿并采集页面截图后，展示检查才完整',
+  )
+
+  addSemanticItem(
+    display,
+    'display',
+    '页面图片和背景素材',
+    '页面资源',
+    meta.images.length || meta.backgroundImages.length ? 'passed' : 'warning',
+    `图片 ${meta.images.length} 个，背景图 ${meta.backgroundImages.length} 个`,
+  )
+
+  for (const term of terms.slice(0, 10)) {
+    const source = findSourceLine(term, lines)
+    const evidence = findVisualEvidence(term, meta)
+    const position = getPositionExpectation(source)
+
+    if (term === '背景' || term === '主视觉') {
+      addSemanticItem(
+        display,
+        'display',
+        `${term}素材需确认`,
+        source,
+        meta.backgroundImages.length || meta.images.length ? 'manual' : 'warning',
+        meta.backgroundImages.length
+          ? describeBackground(meta.backgroundImages[0])
+          : meta.images[0]
+            ? describeImage(meta.images[0])
+            : '未识别到图片或 CSS 背景图',
+      )
+      continue
+    }
+
+    if (!evidence) {
+      addSemanticItem(
+        display,
+        'display',
+        `未找到展示内容：${term}`,
+        source,
+        'warning',
+        '页面 DOM 文本、按钮、图片 alt 和背景区域均未命中',
+      )
+      continue
+    }
+
+    const positionMatched = position ? checkPosition(evidence.box, position, meta) : true
+    addSemanticItem(
+      display,
+      'display',
+      position ? `${term}位置检查` : `找到展示内容：${term}`,
+      source,
+      positionMatched ? 'passed' : 'manual',
+      `${describeVisualEvidence(evidence)}${position && !positionMatched ? '，位置需人工确认' : ''}`,
+    )
+  }
+
+  if (activeCopyResult?.total) {
+    addSemanticItem(
+      content,
+      'content',
+      'CMS 文案匹配',
+      input.ocrText ? '页面 DOM 文本 + 图片 OCR' : '页面 DOM 文本',
+      activeCopyResult.missing.length ? 'warning' : 'passed',
+      `匹配 ${activeCopyResult.matched.length} 条，缺失 ${activeCopyResult.missing.length} 条，忽略需求描述 ${activeCopyResult.ignored.length} 条`,
+    )
+
+    activeCopyResult.missing.slice(0, 6).forEach((item) => {
+      addSemanticItem(
+        content,
+        'content',
+        `疑似缺失文案：${item.source}`,
+        item.source,
+        'warning',
+        input.ocrText
+          ? '页面 DOM 文本和图片 OCR 均未包含该文案'
+          : '页面 DOM 文本未包含该文案；可运行图片 OCR 继续确认',
+      )
+    })
+  } else {
+    addSemanticItem(
+      content,
+      'content',
+      '等待 CMS / 业务方文案',
+      '文案对比',
+      'manual',
+      '粘贴 CMS 文案后，会用页面 DOM 文本做第一轮差异检查',
+    )
+  }
+
+  addSemanticItem(
+    content,
+    'content',
+    input.ocrResults.length ? '图片 OCR 已完成' : '图片 OCR 未运行',
+    '设计稿 / 页面截图',
+    input.ocrResults.length ? 'passed' : 'manual',
+    input.ocrResults.length
+      ? input.ocrResults
+          .map((item) => `${item.label} ${item.text.length} 字 / 置信度 ${item.confidence.toFixed(1)}`)
+          .join('；')
+      : '遇到图片化文案时，可点击“图片 OCR”补充文本证据',
+  )
+
+  const actionTerms = extractFunctionTerms(input.sourceText)
+
+  if (input.actionResults.length) {
+    input.actionResults.forEach((item) => {
+      addSemanticItem(
+        functionChecks,
+        'function',
+        item.title,
+        item.term,
+        item.status,
+        item.evidence,
+      )
+    })
+  }
+
+  if (actionTerms.length) {
+    actionTerms.slice(0, 10).forEach((term) => {
+      const source = findSourceLine(term, lines)
+      const evidence = findInteractiveEvidence(term, meta)
+
+      if (!evidence) {
+        addSemanticItem(
+          functionChecks,
+          'function',
+          `未找到功能入口：${term}`,
+          source,
+          'warning',
+          pageTextHasTerm(term, meta)
+            ? '页面有相关文案，但未识别到可点击元素'
+            : '页面文本和可点击元素均未命中',
+        )
+        return
+      }
+
+      addSemanticItem(
+        functionChecks,
+        'function',
+        `${term}入口已识别`,
+        source,
+        evidence.href ? 'passed' : 'manual',
+        evidence.href
+          ? `${describeElement(evidence)}，可见跳转：${evidence.href}`
+          : `${describeElement(evidence)}，可能是 JS 点击或弹窗，需人工点测`,
+      )
+    })
+  } else {
+    addSemanticItem(
+      functionChecks,
+      'function',
+      '等待需求 / UE 功能描述',
+      '功能检查',
+      'manual',
+      `已采集 ${meta.interactiveElements.length} 个可点击元素，粘贴需求后可匹配入口`,
+    )
+  }
+
+  addSemanticItem(
+    functionChecks,
+    'function',
+    input.folderAssets.length ? '需求 / UE 资料已命中' : '需求 / UE 资料未搜索',
+    '本地资料库',
+    input.folderAssets.length ? 'passed' : 'manual',
+    input.folderAssets.length
+      ? `找到 ${input.folderAssets.length} 个候选资料`
+      : '可以粘贴资料文件夹地址，先找相关 PRD、UE、设计截图',
+  )
+
+  return withSemanticSummary(display, content, functionChecks)
+}
+
+function addSemanticItem(
+  items: SemanticReviewItem[],
+  category: SemanticCategory,
+  title: string,
+  source: string,
+  status: SemanticStatus,
+  evidence: string,
+) {
+  items.push({
+    id: `${category}-${items.length}-${title}`,
+    category,
+    title,
+    source,
+    status,
+    evidence,
+  })
+}
+
+function withSemanticSummary(
+  display: SemanticReviewItem[],
+  content: SemanticReviewItem[],
+  functionChecks: SemanticReviewItem[],
+): SemanticReviewResult {
+  return {
+    display,
+    content,
+    function: functionChecks,
+    summary: {
+      display: summarizeSemanticItems(display),
+      content: summarizeSemanticItems(content),
+      function: summarizeSemanticItems(functionChecks),
+    },
+  }
+}
+
+function summarizeSemanticItems(items: SemanticReviewItem[]): SemanticReviewSummary {
+  return {
+    total: items.length,
+    passed: items.filter((item) => item.status === 'passed').length,
+    warning: items.filter((item) => item.status === 'warning').length,
+    manual: items.filter((item) => item.status === 'manual').length,
+  }
+}
+
+function formatSemanticSummary(summary: SemanticReviewSummary) {
+  return `通过 ${summary.passed} / 风险 ${summary.warning} / 待确认 ${summary.manual}`
+}
+
+function formatGoalStatus(summary: SemanticReviewSummary) {
+  if (!summary.total) return '等待检查'
+  if (summary.warning) return `${summary.warning} 个风险`
+  if (summary.manual) return `${summary.passed}/${summary.total} 已过，${summary.manual} 待确认`
+
+  return `${summary.passed}/${summary.total} 已通过`
+}
+
+function extractReviewLines(value: string) {
+  return value
+    .split(/\r?\n|[；;]/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function extractExpectationTerms(value: string) {
+  const normalized = normalizeCopy(value)
+  const quotedTerms = Array.from(value.matchAll(/[「『“"]([^」』”"]{2,24})[」』”"]/g)).map(
+    (match) => match[1],
+  )
+  const suffixTerms = Array.from(
+    value.matchAll(/([\u4e00-\u9fa5A-Za-z0-9]{2,12})(?:按钮|入口|链接|模块|弹窗)/g),
+  ).map((match) => match[1].replace(/^(页面|点击|打开|跳转到|跳转至|中间要有|右上角要有)/, ''))
+  const knownTerms = knownBusinessTerms.filter((term) => normalized.includes(normalizeCopy(term)))
+
+  return Array.from(new Set([...knownTerms, ...quotedTerms, ...suffixTerms]))
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2 && !isGenericTerm(term))
+}
+
+function extractFunctionTerms(value: string) {
+  const lines = extractReviewLines(value)
+  const actionLines = lines.filter((line) => functionIntentPattern.test(line))
+  const source = actionLines.join('\n') || value
+
+  return extractExpectationTerms(source).filter((term) => isActionTerm(term, findSourceLine(term, lines)))
+}
+
+function isActionTerm(term: string, source: string) {
+  return /下载|预约|购票|领取|绑定|登录|分享|抽奖|报名|兑换|关闭|返回|查看|跳转|打开/.test(
+    `${term}${source}`,
+  )
+}
+
+function isGenericTerm(term: string) {
+  return ['页面', '按钮', '入口', '链接', '模块', '弹窗', '中间要有', '右上角要有'].includes(term)
+}
+
+function findSourceLine(term: string, lines: string[]) {
+  return lines.find((line) => line.includes(term)) || lines.find((line) => includesLoose(line, term)) || term
+}
+
+function findVisualEvidence(term: string, meta: CaptureMeta) {
+  const element = meta.interactiveElements.find((item) =>
+    matchesTerm(`${item.text} ${item.href} ${item.selector}`, term),
+  )
+
+  if (element) return { kind: 'element' as const, box: element.box, label: describeElement(element) }
+
+  const image = meta.images.find((item) => matchesTerm(`${item.alt} ${item.src} ${item.selector}`, term))
+
+  if (image) return { kind: 'image' as const, box: image.box, label: describeImage(image) }
+
+  const background = meta.backgroundImages.find((item) =>
+    matchesTerm(`${item.text} ${item.urls.join(' ')} ${item.selector}`, term),
+  )
+
+  if (background) return { kind: 'background' as const, box: background.box, label: describeBackground(background) }
+
+  if (pageTextHasTerm(term, meta)) {
+    return {
+      kind: 'text' as const,
+      box: { x: 0, y: 0, width: meta.viewportWidth, height: meta.viewportHeight },
+      label: `页面 DOM 文本包含「${term}」`,
+    }
+  }
+
+  return null
+}
+
+function findInteractiveEvidence(term: string, meta: CaptureMeta) {
+  return meta.interactiveElements.find((item) =>
+    matchesTerm(`${item.text} ${item.href} ${item.selector}`, term),
+  )
+}
+
+function pageTextHasTerm(term: string, meta: CaptureMeta) {
+  return matchesTerm(meta.textSample, term)
+}
+
+function matchesTerm(value: string, term: string) {
+  return [term, ...termAliases(term)].some((candidate) => includesLoose(value, candidate))
+}
+
+function termAliases(term: string) {
+  const aliases: Record<string, string[]> = {
+    下载游戏: ['download', 'client', 'game'],
+    立即下载: ['download', 'client', 'game'],
+    预约: ['reserve', 'reservation', 'booking', 'appointment', 'service-navigation'],
+    立即预约: ['reserve', 'reservation', 'booking', 'appointment', 'service-navigation'],
+    购票: ['ticket', 'buy', 'order'],
+    查看详情: ['detail', 'info', 'more'],
+    查看更多: ['more', 'list'],
+    导航: ['navigation', 'nav', 'service-navigation'],
+    服务导航: ['navigation', 'nav', 'service-navigation'],
+    登录: ['login', 'signin'],
+    分享: ['share'],
+    关闭: ['close'],
+    返回: ['back'],
+    领取: ['receive', 'reward', 'gift'],
+    兑换: ['exchange'],
+    抽奖: ['lottery', 'draw'],
+  }
+
+  return aliases[term] || []
+}
+
+function includesLoose(value: string, term: string) {
+  const source = normalizeCopy(value)
+  const target = normalizeCopy(term)
+
+  if (!source || !target) return false
+  if (source.includes(target)) return true
+
+  let position = -1
+
+  return Array.from(target).every((character) => {
+    position = source.indexOf(character, position + 1)
+    return position >= 0
+  })
+}
+
+function getPositionExpectation(source: string) {
+  if (/右上|顶部右侧/.test(source)) return 'top-right'
+  if (/左上|顶部左侧/.test(source)) return 'top-left'
+  if (/中间|居中|中心/.test(source)) return 'center'
+  if (/底部|下方/.test(source)) return 'bottom'
+
+  return ''
+}
+
+function checkPosition(box: DomBox, position: string, meta: CaptureMeta) {
+  const centerX = box.x + box.width / 2
+  const centerY = box.y + box.height / 2
+
+  if (position === 'top-right') {
+    return centerX > meta.viewportWidth * 0.58 && box.y < meta.viewportHeight * 0.45
+  }
+
+  if (position === 'top-left') {
+    return centerX < meta.viewportWidth * 0.42 && box.y < meta.viewportHeight * 0.45
+  }
+
+  if (position === 'center') {
+    return centerX > meta.viewportWidth * 0.18 && centerX < meta.viewportWidth * 0.82 && centerY < meta.height * 0.72
+  }
+
+  if (position === 'bottom') {
+    return centerY > meta.height * 0.65
+  }
+
+  return true
+}
+
+function describeVisualEvidence(evidence: { label: string; box: DomBox }) {
+  return `${evidence.label} / ${formatBox(evidence.box)}`
+}
+
+function describeElement(element: PageElement) {
+  return `${element.text || element.href || element.selector} / ${element.tag}${element.hasClickHandler ? ' / onclick' : ''}`
+}
+
+function describeImage(image: PageImage) {
+  return `${image.alt || image.selector} / ${shortenUrl(image.src)}`
+}
+
+function describeBackground(background: PageBackground) {
+  return `${background.text || background.selector} / ${shortenUrl(background.urls[0] || '')}`
+}
+
+function formatBox(box: DomBox) {
+  return `x:${box.x} y:${box.y} ${box.width}x${box.height}`
+}
+
+function shortenUrl(value: string) {
+  if (!value) return '无 URL'
+  if (value.length <= 80) return value
+
+  return `${value.slice(0, 45)}...${value.slice(-24)}`
+}
+
+async function createVisualDiff(designSrc: string, actualSrc: string) {
+  const [designImage, actualImage] = await Promise.all([
+    loadImage(designSrc),
+    loadImage(actualSrc),
+  ])
+  const maxPixels = 2_400_000
+  const scale = Math.min(
+    1,
+    Math.sqrt(maxPixels / (designImage.naturalWidth * designImage.naturalHeight)),
+  )
+  const width = Math.max(1, Math.round(designImage.naturalWidth * scale))
+  const height = Math.max(1, Math.round(designImage.naturalHeight * scale))
+  const designCanvas = drawScaledImage(designImage, width, height)
+  const actualCanvas = drawScaledImage(actualImage, width, height)
+  const outputCanvas = document.createElement('canvas')
+  const outputContext = get2dContext(outputCanvas)
+
+  outputCanvas.width = width
+  outputCanvas.height = height
+
+  const designData = get2dContext(designCanvas).getImageData(0, 0, width, height)
+  const actualData = get2dContext(actualCanvas).getImageData(0, 0, width, height)
+  const outputData = outputContext.createImageData(width, height)
+  const threshold = 36
+  let diffPixels = 0
+
+  for (let index = 0; index < designData.data.length; index += 4) {
+    const redDelta = Math.abs(designData.data[index] - actualData.data[index])
+    const greenDelta = Math.abs(designData.data[index + 1] - actualData.data[index + 1])
+    const blueDelta = Math.abs(designData.data[index + 2] - actualData.data[index + 2])
+    const alphaDelta = Math.abs(designData.data[index + 3] - actualData.data[index + 3])
+    const delta = (redDelta + greenDelta + blueDelta) / 3
+    const different = delta > threshold || alphaDelta > 64
+
+    if (different) {
+      diffPixels += 1
+      outputData.data[index] = 239
+      outputData.data[index + 1] = 68
+      outputData.data[index + 2] = 68
+      outputData.data[index + 3] = 230
+    } else {
+      const grey =
+        actualData.data[index] * 0.24 +
+        actualData.data[index + 1] * 0.3 +
+        actualData.data[index + 2] * 0.18 +
+        42
+
+      outputData.data[index] = grey
+      outputData.data[index + 1] = grey
+      outputData.data[index + 2] = grey
+      outputData.data[index + 3] = 190
+    }
+  }
+
+  outputContext.putImageData(outputData, 0, 0)
+
+  const totalPixels = width * height
+
+  return {
+    image: outputCanvas.toDataURL('image/png'),
+    stats: {
+      width,
+      height,
+      diffPixels,
+      totalPixels,
+      ratio: diffPixels / totalPixels,
+      threshold,
+    },
+  }
+}
+
+function compareCopy(cmsSource: string, pageText: string): CopyCheckResult {
+  const pageNormalized = normalizeCopy(pageText)
+  const rawLines = cmsSource
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const ignored: string[] = []
+  const items = rawLines.flatMap((line) => {
+    const normalized = normalizeCopy(line)
+
+    if (normalized.length < 2 || shouldIgnoreCopyLine(line)) {
+      ignored.push(line)
+      return []
+    }
+
+    return [{ source: line, normalized }]
+  })
+  const matched: CopyCheckItem[] = []
+  const missing: CopyCheckItem[] = []
+
+  for (const item of items) {
+    if (pageNormalized.includes(item.normalized)) {
+      matched.push({ ...item, status: 'matched' })
+    } else {
+      missing.push({ ...item, status: 'missing' })
+    }
+  }
+
+  return {
+    checkedAt: new Date().toISOString(),
+    pageTextLength: pageText.length,
+    total: items.length,
+    matched,
+    missing,
+    ignored,
+  }
+}
+
+function shouldIgnoreCopyLine(line: string) {
+  return (
+    /是否|要有|需要|需|应该|符合|一致|同一个|对比|验收|设计稿|UE|需求|点击后|点击.+(跳转|打开|弹窗)|右上|左上|中间|底部|背景|主视觉/.test(
+      line,
+    ) &&
+    !copyIntentPattern.test(line)
+  )
+}
+
+function normalizeCopy(value: string) {
+  return value
+    .replace(/[：:]\s*/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[，。、“”‘’！!？?；;,.()[\]【】<>《》\-—_]/g, '')
+    .toLowerCase()
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('图片读取失败，请重新上传截图'))
+    image.src = src
+  })
+}
+
+function drawScaledImage(image: HTMLImageElement, width: number, height: number) {
+  const canvas = document.createElement('canvas')
+  const context = get2dContext(canvas)
+
+  canvas.width = width
+  canvas.height = height
+  context.drawImage(image, 0, 0, width, height)
+
+  return canvas
+}
+
+function get2dContext(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+
+  if (!context) {
+    throw new Error('当前浏览器不支持 Canvas diff')
+  }
+
+  return context
+}
+
+function ReviewGoalCard({
+  icon,
+  title,
+  desc,
+  status,
+}: {
+  icon: ReactNode
+  title: string
+  desc: string
+  status: string
+}) {
+  return (
+    <article className="rounded-md border border-border bg-background p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold [&_svg]:size-4">
+        {icon}
+        {title}
+      </div>
+      <p className="min-h-10 text-sm text-muted-foreground">{desc}</p>
+      <Badge variant="outline" className="mt-3">
+        {status}
+      </Badge>
+    </article>
+  )
+}
+
+function SemanticChecksPanel({ result }: { result: SemanticReviewResult }) {
+  const groups: Array<{
+    key: SemanticCategory
+    title: string
+    items: SemanticReviewItem[]
+  }> = [
+    { key: 'display', title: '展示检查', items: result.display },
+    { key: 'content', title: '内容检查', items: result.content },
+    { key: 'function', title: '功能检查', items: result.function },
+  ]
+
+  return (
+    <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <ClipboardList className="size-4" />
+          三类自动检查
+        </div>
+        <Badge variant="outline">
+          {result.summary.display.warning + result.summary.content.warning + result.summary.function.warning} 个风险
+        </Badge>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-3">
+        {groups.map((group) => (
+          <article key={group.key} className="rounded-md border border-border bg-panel p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">{group.title}</h3>
+              <Badge variant={result.summary[group.key].warning ? 'warning' : 'success'}>
+                {formatSemanticSummary(result.summary[group.key])}
+              </Badge>
+            </div>
+            <div className="space-y-2">
+              {group.items.slice(0, 7).map((item) => (
+                <SemanticCheckRow key={item.id} item={item} />
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SemanticCheckRow({ item }: { item: SemanticReviewItem }) {
+  return (
+    <div className="rounded-md border border-border bg-background p-2">
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <p className="text-sm font-medium leading-5">{item.title}</p>
+        <Badge variant={semanticStatusVariant(item.status)}>{semanticStatusLabel(item.status)}</Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">{item.source}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.evidence}</p>
+    </div>
+  )
+}
+
+function semanticStatusLabel(status: SemanticStatus) {
+  if (status === 'passed') return '通过'
+  if (status === 'warning') return '风险'
+
+  return '待确认'
+}
+
+function semanticStatusVariant(status: SemanticStatus) {
+  if (status === 'passed') return 'success'
+  if (status === 'warning') return 'warning'
+
+  return 'outline'
+}
+
+function EvidencePanel({
+  designPreview,
+  actualPreview,
+  diffPreview,
+  diffStats,
+  pageType,
+  onPageTypeChange,
+  url,
+  onUrlChange,
+  onDesignUpload,
+  onActualUpload,
+}: {
+  designPreview: string
+  actualPreview: string
+  diffPreview: string
+  diffStats: DiffStats | null
+  pageType: PageType
+  onPageTypeChange: (value: PageType) => void
+  url: string
+  onUrlChange: (value: string) => void
+  onDesignUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onActualUpload: (event: ChangeEvent<HTMLInputElement>) => void
+}) {
+  return (
+    <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <FileImage className="size-4" />
+        展示证据
+      </div>
+      <div className="grid gap-3">
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">页面 URL</span>
+          <div className="relative">
+            <Link2 className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <Input value={url} onChange={(event) => onUrlChange(event.target.value)} className="pl-9" />
+          </div>
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">页面类型</span>
+          <select
+            value={pageType}
+            onChange={(event) => onPageTypeChange(event.target.value as PageType)}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+          >
+            {pageTypes.map((type) => (
+              <option key={type}>{type}</option>
+            ))}
+          </select>
+        </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <UploadThumb title="设计稿" image={designPreview} onChange={onDesignUpload} />
+          <UploadThumb title="页面截图" image={actualPreview} onChange={onActualUpload} />
+        </div>
+        <div className="rounded-md border border-border bg-panel p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold">视觉参考</span>
+            <Badge variant={diffStats ? 'warning' : 'outline'}>
+              {diffStats ? `${(diffStats.ratio * 100).toFixed(2)}%` : '未生成'}
+            </Badge>
+          </div>
+          {diffPreview ? (
+            <img src={diffPreview} alt="视觉参考图" className="max-h-64 w-full object-contain" />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              只辅助判断关键模块、入口、背景是否明显不一致，不做像素级验收结论。
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function UploadThumb({
+  title,
+  image,
+  onChange,
+}: {
+  title: string
+  image: string
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void
+}) {
+  return (
+    <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-border bg-panel p-3 text-center">
+      <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={onChange} />
+      {image ? (
+        <img src={image} alt={title} className="max-h-44 w-full object-contain" />
+      ) : (
+        <>
+          <Upload className="mb-2 size-5 text-muted-foreground" />
+          <span className="text-sm font-medium">{title}</span>
+          <span className="text-xs text-muted-foreground">上传截图</span>
+        </>
+      )}
+    </label>
+  )
+}
+
+function ContentAndFolderPanel({
+  cmsText,
+  onCmsTextChange,
+  copyResult,
+  ocrResults,
+  actionResults,
+  folderPath,
+  folderQuery,
+  folderAssets,
+  isSearchingFolder,
+  onFolderPathChange,
+  onFolderQueryChange,
+  onSearchFolder,
+}: {
+  cmsText: string
+  onCmsTextChange: (value: string) => void
+  copyResult: CopyCheckResult | null
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  folderPath: string
+  folderQuery: string
+  folderAssets: FolderAsset[]
+  isSearchingFolder: boolean
+  onFolderPathChange: (value: string) => void
+  onFolderQueryChange: (value: string) => void
+  onSearchFolder: () => void
+}) {
+  return (
+    <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <FolderOpen className="size-4" />
+        内容与资料
+      </div>
+      <div className="space-y-3">
+        <Textarea
+          value={cmsText}
+          onChange={(event) => onCmsTextChange(event.target.value)}
+          placeholder="粘贴 CMS 文案、业务方文案、需求或 UE 描述"
+          className="min-h-32 font-mono text-xs"
+        />
+        <div className="grid gap-2 sm:grid-cols-3">
+          <MiniMetric label="CMS 匹配" value={copyResult ? `${copyResult.matched.length}` : '-'} />
+          <MiniMetric label="CMS 缺失" value={copyResult ? `${copyResult.missing.length}` : '-'} />
+          <MiniMetric label="候选资料" value={`${folderAssets.length}`} />
+        </div>
+        {ocrResults.length ? (
+          <ResultList
+            title="图片 OCR 文案"
+            items={ocrResults.map(
+              (item) => `${item.label} / 置信度 ${item.confidence.toFixed(1)}：${compactText(item.text) || '未识别到文字'}`,
+            )}
+          />
+        ) : null}
+        {actionResults.length ? (
+          <ResultList
+            title="功能点测结果"
+            items={actionResults.map((item) => `${semanticStatusLabel(item.status)} / ${item.title}：${item.evidence}`)}
+          />
+        ) : null}
+        {copyResult?.missing.length ? (
+          <ResultList title="疑似缺失文案" items={copyResult.missing.map((item) => item.source)} />
+        ) : null}
+        <div className="grid gap-2 sm:grid-cols-[1fr_0.8fr_auto]">
+          <Input value={folderPath} onChange={(event) => onFolderPathChange(event.target.value)} />
+          <Input value={folderQuery} onChange={(event) => onFolderQueryChange(event.target.value)} />
+          <Button variant="outline" onClick={onSearchFolder} disabled={isSearchingFolder || !folderPath}>
+            {isSearchingFolder ? <Loader2 className="animate-spin" /> : <Search />}
+            搜索
+          </Button>
+        </div>
+        <div className="max-h-56 space-y-2 overflow-auto pr-1">
+          {folderAssets.slice(0, 12).map((asset) => (
+            <article key={asset.path} className="rounded-md border border-border bg-panel p-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-medium">{asset.name}</p>
+                <Badge variant="outline">{asset.type}</Badge>
+              </div>
+              <p className="truncate text-xs text-muted-foreground">{asset.relativePath}</p>
+              {asset.snippet ? <p className="mt-1 text-xs text-muted-foreground">{asset.snippet}</p> : null}
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-panel p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-semibold">{value}</div>
+    </div>
+  )
+}
+
+function ResultList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 text-xs font-semibold text-muted-foreground">{title}</div>
+      <div className="space-y-1">
+        {items.slice(0, 8).map((item) => (
+          <p key={item} className="rounded-sm bg-background px-2 py-1 text-xs">
+            {item}
+          </p>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function IssueRow({ issue }: { issue: ReviewIssue }) {
+  const severityVariant =
+    issue.severity === '高' ? 'danger' : issue.severity === '中' ? 'warning' : 'outline'
+
+  return (
+    <article className="rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">{issue.type}</Badge>
+            <Badge variant={severityVariant}>{issue.severity}</Badge>
+          </div>
+          <h3 className="mt-2 text-sm font-semibold">{issue.title}</h3>
+        </div>
+        <Badge variant="outline">{issue.status}</Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">{issue.location}</p>
+    </article>
+  )
+}
+
+function InlineErrors({ errors }: { errors: string[] }) {
+  const activeErrors = errors.filter(Boolean)
+
+  if (!activeErrors.length) return null
+
+  return (
+    <div className="mt-3 space-y-2">
+      {activeErrors.map((error) => (
+        <p key={error} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+export default App
