@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>专题验收助手 - AI 看板线框</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f4f0;
+        --surface: #fffefa;
+        --panel: #f9f8f3;
+        --line: #dedbd0;
+        --text: #22231f;
+        --muted: #74766e;
+        --ink: #181916;
+        --risk: #d97706;
+        --danger: #dc2626;
+        --ok: #059669;
+        --blue: #2563eb;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      textarea,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .app {
+        min-height: 100vh;
+        padding: 18px;
+      }
+
+      .topbar,
+      .hero,
+      .board,
+      .bottom-bar,
+      .drawer {
+        border: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 58px;
+        padding: 10px 14px;
+        border-radius: 10px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 240px;
+      }
+
+      .mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--ink);
+        color: #fff;
+        font-weight: 700;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .brand p,
+      .muted {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .project-switch {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 320px;
+      }
+
+      .project-name {
+        min-width: 280px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn {
+        min-height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        padding: 0 12px;
+        font-size: 13px;
+      }
+
+      .btn.primary {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: #fff;
+      }
+
+      .state-tabs {
+        display: flex;
+        gap: 8px;
+        margin: 14px 0;
+      }
+
+      .state-tabs .btn.active {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: #fff;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .main {
+        min-width: 0;
+      }
+
+      .hero {
+        padding: 18px;
+        border-radius: 12px;
+      }
+
+      .hero-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 14px;
+      }
+
+      .hero h2 {
+        margin: 0 0 6px;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .input-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+      }
+
+      textarea {
+        min-height: 118px;
+        width: 100%;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 12px;
+        outline: none;
+        line-height: 1.6;
+      }
+
+      .drop-hints {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .chip,
+      .status,
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel);
+        padding: 0 9px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status.ok {
+        border-color: #bbf7d0;
+        background: #ecfdf5;
+        color: var(--ok);
+      }
+
+      .status.risk {
+        border-color: #fed7aa;
+        background: #fffbeb;
+        color: var(--risk);
+      }
+
+      .status.danger {
+        border-color: #fecaca;
+        background: #fef2f2;
+        color: var(--danger);
+      }
+
+      .recognition {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface);
+        padding: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 20px;
+      }
+
+      .progress-line {
+        position: relative;
+        min-height: 76px;
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 14px;
+        overflow: hidden;
+      }
+
+      .progress-line::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 42%;
+        background:
+          linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.12), transparent);
+        animation: scan 1.8s infinite;
+      }
+
+      @keyframes scan {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(240%);
+        }
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 1px;
+        margin-top: 14px;
+        overflow: hidden;
+        border-radius: 12px;
+        background: var(--line);
+      }
+
+      .lane {
+        min-height: 440px;
+        background: var(--surface);
+        padding: 12px;
+      }
+
+      .lane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 32px;
+        margin-bottom: 10px;
+      }
+
+      .lane h3 {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .card {
+        display: block;
+        width: 100%;
+        margin-bottom: 9px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 10px;
+        text-align: left;
+      }
+
+      .card:hover,
+      .card.selected {
+        border-color: var(--ink);
+        background: #fff;
+      }
+
+      .card-title {
+        margin: 0 0 7px;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.45;
+      }
+
+      .card-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .evidence-line {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .drawer {
+        position: sticky;
+        top: 18px;
+        min-height: calc(100vh - 36px);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .drawer h2 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .drawer-section {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 12px;
+      }
+
+      .placeholder-image {
+        display: grid;
+        min-height: 160px;
+        place-items: center;
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .small-shot {
+        display: grid;
+        min-height: 88px;
+        place-items: center;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .bottom-bar {
+        position: sticky;
+        bottom: 12px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        margin-top: 14px;
+        border-radius: 12px;
+        padding: 12px 14px;
+        box-shadow: 0 10px 28px rgba(20, 20, 16, 0.08);
+      }
+
+      .bottom-bar strong {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 14px;
+      }
+
+      .summary-text {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .empty .board,
+      .empty .recognition,
+      .empty .bottom-bar,
+      .empty .drawer-result,
+      .running .board-result,
+      .running .drawer-result,
+      .empty .running-board,
+      .result .running-board,
+      .result .progress-line,
+      .result .drawer-empty,
+      .running .drawer-empty {
+        display: none;
+      }
+
+      .empty .hero {
+        min-height: 520px;
+        display: grid;
+        align-content: center;
+      }
+
+      .running .board {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      @media (max-width: 1180px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .drawer {
+          position: static;
+          min-height: 0;
+        }
+
+        .board {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .app {
+          padding: 10px;
+        }
+
+        .topbar,
+        .hero-head,
+        .input-shell,
+        .bottom-bar {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+
+        .topbar,
+        .project-switch,
+        .actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .project-switch,
+        .project-name {
+          min-width: 0;
+          width: 100%;
+        }
+
+        .recognition,
+        .board,
+        .running .board {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app result" id="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark">验</div>
+          <div>
+            <h1>专题验收助手</h1>
+            <p>AI review board wireframe</p>
+          </div>
+        </div>
+        <div class="project-switch">
+          <input class="project-name" value="剑网3十七周年移动端专题验收" />
+          <span class="pill">网页移动端</span>
+          <span class="pill">本地项目</span>
+        </div>
+        <div class="actions">
+          <button class="btn">历史</button>
+          <button class="btn">保存</button>
+          <button class="btn primary">导出报告</button>
+        </div>
+      </header>
+
+      <nav class="state-tabs" aria-label="线框状态切换">
+        <button class="btn" data-state="empty">空状态</button>
+        <button class="btn" data-state="running">验收中</button>
+        <button class="btn active" data-state="result">有结果</button>
+      </nav>
+
+      <div class="workspace">
+        <main class="main">
+          <section class="hero">
+            <div class="hero-head">
+              <div>
+                <h2>把验收资料丢进来，AI 自动整理风险看板</h2>
+                <p>
+                  支持页面 URL、设计稿截图、CMS 文案、UE/PRD、本地资料文件夹。
+                  主界面只保留输入、识别、看板和结论，证据按需展开。
+                </p>
+              </div>
+              <button class="btn primary">开始验收</button>
+            </div>
+
+            <div class="input-shell">
+              <textarea>https://test-zt.xoyo.com/jx3.xoyo.com/p/m/2026/07/20/anniversary/#/
+D:\vscode\动效\docs 周年庆 演唱会 购票
+页面右上角要有下载游戏
+购票按钮点击后跳转购票页
+CMS：剑网3十七周年演唱会票正式开售</textarea>
+              <button class="btn primary">分析资料</button>
+            </div>
+
+            <div class="drop-hints">
+              <span class="chip">粘贴 URL</span>
+              <span class="chip">拖入设计稿</span>
+              <span class="chip">粘贴 CMS 文案</span>
+              <span class="chip">粘贴资料文件夹</span>
+              <span class="chip">粘贴 UE/PRD 描述</span>
+            </div>
+
+            <div class="recognition">
+              <div class="metric">
+                <span class="muted">页面</span>
+                <strong>1</strong>
+                <span class="status ok">已采集</span>
+              </div>
+              <div class="metric">
+                <span class="muted">资料</span>
+                <strong>6</strong>
+                <span class="status ok">已识别</span>
+              </div>
+              <div class="metric">
+                <span class="muted">文案</span>
+                <strong>18</strong>
+                <span class="status risk">3 条疑似缺失</span>
+              </div>
+              <div class="metric">
+                <span class="muted">功能点</span>
+                <strong>5</strong>
+                <span class="status risk">1 个待复核</span>
+              </div>
+            </div>
+
+            <div class="progress-line">
+              <strong>AI 正在验收</strong>
+              <p class="summary-text">正在采集页面 DOM、读取资料候选、运行 OCR，并准备功能点测。</p>
+            </div>
+          </section>
+
+          <section class="board board-result" aria-label="AI 验收看板">
+            <section class="lane">
+              <div class="lane-head">
+                <h3>资料</h3>
+                <span class="status ok">6 个</span>
+              </div>
+              <button class="card selected" data-detail="资料预览">
+                <p class="card-title">PRD / UE 已命中</p>
+                <p class="evidence-line">README、活动需求、设计截图、CMS 文案。</p>
+                <div class="card-meta">
+                  <span class="chip">可预览</span>
+                  <span class="chip">可引用</span>
+                </div>
+              </button>
+              <button class="card" data-detail="设计稿资料">
+                <p class="card-title">设计稿截图</p>
+                <p class="evidence-line">可设为展示证据，进入视觉检查。</p>
+              </button>
+            </section>
+
+            <section class="lane">
+              <div class="lane-head">
+                <h3>展示</h3>
+                <span class="status risk">2 风险</span>
+              </div>
+              <button class="card" data-detail="下载入口">
+                <p class="card-title">右上角下载游戏入口未命中</p>
+                <p class="evidence-line">需求提到右上角入口，页面 DOM 未识别到可点击元素。</p>
+                <div class="card-meta">
+                  <span class="status risk">待确认</span>
+                </div>
+              </button>
+              <button class="card" data-detail="背景图">
+                <p class="card-title">背景图需人工确认</p>
+                <p class="evidence-line">已找到 CSS 背景，但无法直接判断是否与设计稿一致。</p>
+              </button>
+            </section>
+
+            <section class="lane">
+              <div class="lane-head">
+                <h3>内容</h3>
+                <span class="status danger">3 风险</span>
+              </div>
+              <button class="card" data-detail="CMS 文案">
+                <p class="card-title">3 条 CMS 文案疑似缺失</p>
+                <p class="evidence-line">页面 DOM + OCR 均未完整命中文案。</p>
+                <div class="card-meta">
+                  <span class="status danger">需复核</span>
+                </div>
+              </button>
+              <button class="card" data-detail="OCR 修正">
+                <p class="card-title">OCR 已人工修正 1 项</p>
+                <p class="evidence-line">修正后可重新参与 CMS 对比。</p>
+              </button>
+            </section>
+
+            <section class="lane">
+              <div class="lane-head">
+                <h3>功能</h3>
+                <span class="status risk">1 风险</span>
+              </div>
+              <button class="card" data-detail="购票点测">
+                <p class="card-title">购票按钮点测通过</p>
+                <p class="evidence-line">点击后 URL 发生变化，符合跳转预期。</p>
+                <div class="card-meta">
+                  <span class="status ok">通过</span>
+                </div>
+              </button>
+              <button class="card" data-detail="接驳预约">
+                <p class="card-title">往返接驳预约未找到入口</p>
+                <p class="evidence-line">需求存在，但页面可点击元素未命中。</p>
+              </button>
+            </section>
+
+            <section class="lane">
+              <div class="lane-head">
+                <h3>问题</h3>
+                <span class="status danger">6 项</span>
+              </div>
+              <button class="card" data-detail="上线阻断">
+                <p class="card-title">上线前优先处理</p>
+                <p class="evidence-line">下载入口、CMS 缺失、预约入口需要人工确认。</p>
+              </button>
+              <button class="card" data-detail="报告草稿">
+                <p class="card-title">报告草稿已生成</p>
+                <p class="evidence-line">可复制 Markdown 或下载归档。</p>
+              </button>
+            </section>
+          </section>
+
+          <section class="board running-board">
+            <section class="lane">
+              <div class="lane-head"><h3>读取资料</h3><span class="status ok">完成</span></div>
+              <div class="card"><p class="card-title">扫描文件夹</p><p class="evidence-line">已命中 PRD、UE、设计稿、CMS 资料。</p></div>
+            </section>
+            <section class="lane">
+              <div class="lane-head"><h3>采集页面</h3><span class="status ok">完成</span></div>
+              <div class="card"><p class="card-title">移动端截图</p><p class="evidence-line">已提取 DOM 文本、按钮、图片和背景。</p></div>
+            </section>
+            <section class="lane">
+              <div class="lane-head"><h3>识别内容</h3><span class="status risk">进行中</span></div>
+              <div class="card"><p class="card-title">OCR + CMS 对比</p><p class="evidence-line">正在合并页面文本和图片文字。</p></div>
+            </section>
+            <section class="lane">
+              <div class="lane-head"><h3>功能点测</h3><span class="status">等待</span></div>
+              <div class="card"><p class="card-title">点击核心入口</p><p class="evidence-line">将记录点击前后截图和失败原因。</p></div>
+            </section>
+          </section>
+
+          <section class="bottom-bar">
+            <div>
+              <strong>AI 结论：当前 6 个风险，建议先处理 3 个上线阻断项</strong>
+              <p class="summary-text">重点复核下载入口、CMS 缺失文案、往返接驳预约入口；其余问题可人工标记后进入报告。</p>
+            </div>
+            <div class="actions">
+              <button class="btn">人工确认</button>
+              <button class="btn primary">生成报告</button>
+            </div>
+          </section>
+        </main>
+
+        <aside class="drawer">
+          <div class="drawer-empty">
+            <h2>证据抽屉</h2>
+            <p class="summary-text">点击看板卡片后，这里展示截图、OCR、DOM、点测结果和人工确认。</p>
+          </div>
+
+          <div class="drawer-result">
+            <h2 id="drawerTitle">资料预览</h2>
+            <p class="summary-text">抽屉只在需要时出现，避免主界面一开始就堆满截图和表单。</p>
+
+            <section class="drawer-section">
+              <strong>证据截图</strong>
+              <div class="placeholder-image">设计稿 / 页面截图预览</div>
+            </section>
+
+            <section class="drawer-section">
+              <strong>点测截图</strong>
+              <div class="compare">
+                <div class="small-shot">点击前</div>
+                <div class="small-shot">点击后</div>
+              </div>
+            </section>
+
+            <section class="drawer-section">
+              <strong>文字证据</strong>
+              <p class="summary-text">DOM 文本：剑网3十七周年演唱会票正式开售</p>
+              <p class="summary-text">OCR 修正：演唱会、购票、查看详情</p>
+            </section>
+
+            <section class="drawer-section">
+              <strong>人工确认</strong>
+              <div class="drop-hints">
+                <span class="chip">通过</span>
+                <span class="chip">需修改</span>
+                <span class="chip">待确认</span>
+                <span class="chip">忽略</span>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script>
+      const app = document.querySelector("#app")
+      const stateButtons = Array.from(document.querySelectorAll("[data-state]"))
+      const cards = Array.from(document.querySelectorAll("[data-detail]"))
+      const drawerTitle = document.querySelector("#drawerTitle")
+
+      stateButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          stateButtons.forEach((item) => item.classList.remove("active"))
+          button.classList.add("active")
+          app.className = `app ${button.dataset.state}`
+        })
+      })
+
+      cards.forEach((card) => {
+        card.addEventListener("click", () => {
+          cards.forEach((item) => item.classList.remove("selected"))
+          card.classList.add("selected")
+          drawerTitle.textContent = card.dataset.detail
+        })
+      })
+    </script>
+  </body>
+</html>
