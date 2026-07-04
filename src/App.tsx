@@ -224,6 +224,23 @@ interface ChatMessage {
   text: string
 }
 
+type ReviewWorkflowStepId = 'parse' | 'collect' | 'compare' | 'conclude' | 'done'
+type ReviewSourceId = 'url' | 'design' | 'actual' | 'cms' | 'folder' | 'ocr' | 'function'
+
+interface ReviewWorkflowStep {
+  id: ReviewWorkflowStepId
+  title: string
+  status: 'idle' | 'active' | 'done' | 'blocked'
+  detail: string
+}
+
+interface InputSignal {
+  id: string
+  label: string
+  value: string
+  status: 'ready' | 'missing' | 'pending'
+}
+
 type SemanticCategory = 'display' | 'content' | 'function'
 type SemanticStatus = 'passed' | 'warning' | 'manual'
 type ReviewDecisionStatus = 'auto' | 'passed' | 'needs-change' | 'pending' | 'ignored'
@@ -456,6 +473,9 @@ function App() {
   const [smartSummary, setSmartSummary] = useState(persistedState.smartSummary || '')
   const [reportNotice, setReportNotice] = useState('')
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false)
+  const [activeWorkflowStep, setActiveWorkflowStep] = useState<ReviewWorkflowStepId | ''>('')
+  const [workflowNotice, setWorkflowNotice] = useState('等待资料输入')
+  const [activeSourceId, setActiveSourceId] = useState<ReviewSourceId>('url')
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -580,6 +600,60 @@ function App() {
     () => summarizeReviewDecisions(allSemanticItems, reviewDecisions),
     [allSemanticItems, reviewDecisions],
   )
+  const inputSignals = useMemo(
+    () =>
+      buildInputSignals({
+        chatInput,
+        url,
+        folderPath,
+        cmsText,
+        hasDesign: Boolean(designPreview),
+        hasActual: Boolean(actualPreview),
+        folderAssets,
+      }),
+    [actualPreview, chatInput, cmsText, designPreview, folderAssets, folderPath, url],
+  )
+  const workflowSteps = useMemo(
+    () =>
+      buildWorkflowSteps({
+        activeStep: activeWorkflowStep,
+        hasRecognizedInput: inputSignals.some((item) => item.status === 'ready'),
+        captureMeta,
+        folderAssets,
+        copyResult,
+        actionResults,
+        smartSummary,
+        finalConclusion,
+        isCapturing,
+        isSearchingFolder,
+        isTestingActions,
+      }),
+    [
+      actionResults,
+      activeWorkflowStep,
+      captureMeta,
+      copyResult,
+      finalConclusion,
+      folderAssets,
+      inputSignals,
+      isCapturing,
+      isSearchingFolder,
+      isTestingActions,
+      smartSummary,
+    ],
+  )
+  const missingSuggestions = useMemo(
+    () =>
+      buildMissingSuggestions({
+        hasUrl: Boolean(url.trim()),
+        hasDesign: Boolean(designPreview),
+        hasActual: Boolean(actualPreview || captureMeta),
+        hasCms: Boolean(cmsText.trim()),
+        hasFolderAssets: Boolean(folderAssets.length),
+        hasActionResults: Boolean(actionResults.length),
+      }),
+    [actionResults.length, actualPreview, captureMeta, cmsText, designPreview, folderAssets.length, url],
+  )
 
   const report = useMemo(
     () =>
@@ -656,6 +730,11 @@ function App() {
         text,
       },
     ])
+  }
+
+  function setWorkflow(step: ReviewWorkflowStepId, notice: string) {
+    setActiveWorkflowStep(step)
+    setWorkflowNotice(notice)
   }
 
   function updateReviewDecisionStatus(itemId: string, status: ReviewDecisionStatus) {
@@ -1017,72 +1096,71 @@ function App() {
     reader.readAsDataURL(file)
   }
 
-  async function submitChat() {
+  async function startReview() {
+    setWorkflow('parse', '正在识别输入里的 URL、CMS 文案、PRD/UE 描述和本地资料路径。')
+
+    let activeUrl = url
+    let activeFolder = folderPath
+    let activeCmsText = cmsText
+    let activeMeta = captureMeta
     const text = chatInput.trim()
 
-    if (!text) return
+    try {
+      if (text) {
+        setChatInput('')
+        addMessage('user', text)
 
-    setChatInput('')
-    addMessage('user', text)
+        const nextUrl = extractUrl(text)
+        const nextFolder = extractWindowsPath(text)
+        const remainingText = stripKnownInputs(text, [nextUrl, nextFolder])
 
-    const nextUrl = extractUrl(text)
-    const nextFolder = extractWindowsPath(text)
-    const remainingText = stripKnownInputs(text, [nextUrl, nextFolder])
-    const nextQuery = remainingText || folderQuery
+        if (nextUrl) {
+          activeUrl = nextUrl
+          setUrl(nextUrl)
+        }
 
-    if (nextUrl) {
-      setUrl(nextUrl)
-      addMessage('assistant', `已识别页面 URL：${nextUrl}。我开始自动截图。`)
-    }
+        if (nextFolder) {
+          activeFolder = nextFolder
+          setFolderPath(nextFolder)
+        }
 
-    if (nextFolder) {
-      setFolderPath(nextFolder)
-      if (remainingText) {
-        setFolderQuery(remainingText)
+        if (remainingText) {
+          activeCmsText = remainingText
+          setCmsText(remainingText)
+          setCopyResult(null)
+          setActionResults([])
+        }
       }
-      addMessage('assistant', `已识别资料文件夹：${nextFolder}。我开始搜索相关设计稿、需求和 UE 资料。`)
-      await searchFolder(nextFolder, nextQuery)
-    }
 
-    if (remainingText) {
-      setCmsText(remainingText)
-      setCopyResult(null)
-      setActionResults([])
-      addMessage('assistant', '已把剩余文本作为 CMS/业务方文案或需求/UE 描述候选。')
-    }
+      setWorkflow('collect', '正在采集页面证据，并从本地资料夹里搜索 PRD、UE、CMS 或设计稿线索。')
 
-    if (nextUrl) {
-      await capturePage(nextUrl, remainingText || cmsText)
-      return
-    }
-
-    if (!nextUrl && !nextFolder && remainingText) {
-      if (captureMeta?.textSample) {
-        runCopyComparison(remainingText, captureMeta.textSample)
-      } else {
-        addMessage('assistant', '还没有页面截图文本。请先丢页面 URL，或点击自动截图后我再对比文案。')
+      if (activeFolder.trim() && (!folderAssets.length || Boolean(text && text.includes(activeFolder)))) {
+        await searchFolder(activeFolder, activeCmsText || folderQuery)
       }
-    }
-  }
 
-  async function startReview() {
-    if (chatInput.trim()) {
-      await submitChat()
-      return
-    }
+      if (activeUrl.trim()) {
+        activeMeta = await capturePage(activeUrl, activeCmsText)
+      }
 
-    let activeMeta = captureMeta
+      setWorkflow('compare', '正在对比页面展示、业务文案和可点击功能入口。')
 
-    if (!activeMeta && url.trim()) {
-      activeMeta = await capturePage()
-    }
+      if (activeCmsText.trim() && activeMeta?.textSample) {
+        runCopyComparison(activeCmsText, getPageComparisonText(activeMeta, collectOcrText(ocrResults)))
+      }
 
-    if (cmsText.trim() && activeMeta?.textSample) {
-      runCopyComparison(cmsText, getPageComparisonText(activeMeta, collectOcrText(ocrResults)))
-    }
+      if (activeUrl.trim() && activeCmsText.trim()) {
+        await runActionCheck(activeUrl, activeCmsText)
+      }
 
-    if (!smartSummary.trim()) {
+      setWorkflow('conclude', '正在整理三段验收结论和上线建议。')
       generateSmartSummary()
+      generateConclusionDraft()
+      setWorkflow('done', '验收流程已完成。可以查看三段结论，或展开高级细节复核证据。')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '验收流程执行失败'
+
+      setWorkflowNotice(`流程中断：${message}`)
+      addMessage('assistant', `验收流程中断：${message}`)
     }
   }
 
@@ -1227,16 +1305,16 @@ function App() {
     }
   }
 
-  async function runActionCheck() {
+  async function runActionCheck(targetUrl = url, sourceText = cmsText) {
     setIsTestingActions(true)
     setActionError('')
 
     try {
-      if (!url.trim()) {
+      if (!targetUrl.trim()) {
         throw new Error('请先填写页面 URL')
       }
 
-      const expectations = extractFunctionTerms(cmsText)
+      const expectations = extractFunctionTerms(sourceText)
 
       if (!expectations.length) {
         throw new Error('请先粘贴需求或 UE 功能描述，例如“购票按钮点击后跳转购票页”')
@@ -1245,7 +1323,7 @@ function App() {
       const response = await fetch(actionCheckEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, expectations, waitMs: 4000 }),
+        body: JSON.stringify({ url: targetUrl, expectations, waitMs: 4000 }),
       })
       const data = (await response.json()) as ActionCheckResponse
 
@@ -1329,6 +1407,9 @@ function App() {
           pageType={pageType}
           chatInput={chatInput}
           lastMessage={messages[messages.length - 1]?.text || ''}
+          inputSignals={inputSignals}
+          workflowSteps={workflowSteps}
+          workflowNotice={workflowNotice}
           isBusy={isCapturing || isRunningOcr || isTestingActions || isSearchingFolder}
           isCapturing={isCapturing}
           isDiffing={isDiffing}
@@ -1368,8 +1449,24 @@ function App() {
             folderAssets={folderAssets}
             projects={projects}
             activeProjectId={activeProjectId}
+            activeSourceId={activeSourceId}
+            url={url}
+            folderPath={folderPath}
+            folderQuery={folderQuery}
+            assetPreview={assetPreview}
+            isSearchingFolder={isSearchingFolder}
+            onSourceSelect={setActiveSourceId}
             onNewProject={createNewProject}
             onLoadProject={loadProject}
+            onUrlChange={setUrl}
+            onDesignUpload={(event) => handlePreview(event, setDesignPreview, 'design')}
+            onCmsTextChange={(value) => {
+              setCmsText(value)
+              setCopyResult(null)
+            }}
+            onFolderPathChange={setFolderPath}
+            onFolderQueryChange={setFolderQuery}
+            onSearchFolder={() => searchFolder()}
           />
 
           <div className="min-w-0 space-y-4">
@@ -1379,6 +1476,7 @@ function App() {
               copyResult={copyResult}
               actionResults={actionResults}
               issues={issues}
+              missingSuggestions={missingSuggestions}
               onStatusChange={updateReviewDecisionStatus}
               onNoteChange={updateReviewDecisionNote}
             />
@@ -1496,6 +1594,144 @@ function compactText(value: string) {
   if (text.length <= 120) return text
 
   return `${text.slice(0, 120)}...`
+}
+
+function buildInputSignals({
+  chatInput,
+  url,
+  folderPath,
+  cmsText,
+  hasDesign,
+  hasActual,
+  folderAssets,
+}: {
+  chatInput: string
+  url: string
+  folderPath: string
+  cmsText: string
+  hasDesign: boolean
+  hasActual: boolean
+  folderAssets: FolderAsset[]
+}): InputSignal[] {
+  const draftUrl = extractUrl(chatInput)
+  const draftFolder = extractWindowsPath(chatInput)
+  const draftText = stripKnownInputs(chatInput, [draftUrl, draftFolder])
+  const hasDraftText = draftText.trim().length > 8
+
+  return [
+    {
+      id: 'url',
+      label: '页面 URL',
+      value: draftUrl || (url.trim() ? '已填写' : '缺失'),
+      status: draftUrl || url.trim() ? 'ready' : 'missing',
+    },
+    {
+      id: 'design',
+      label: '设计稿',
+      value: hasDesign ? '已上传' : '待上传',
+      status: hasDesign ? 'ready' : 'missing',
+    },
+    {
+      id: 'cms',
+      label: 'CMS/需求',
+      value: hasDraftText ? '输入中' : cmsText.trim() ? '已保存' : '待粘贴',
+      status: hasDraftText || cmsText.trim() ? 'ready' : 'missing',
+    },
+    {
+      id: 'folder',
+      label: '本地资料',
+      value: draftFolder || (folderAssets.length ? `${folderAssets.length} 个命中` : folderPath.trim() ? '路径已填' : '缺失'),
+      status: draftFolder || folderAssets.length || folderPath.trim() ? 'ready' : 'missing',
+    },
+    {
+      id: 'actual',
+      label: '页面截图',
+      value: hasActual ? '已采集' : '自动采集',
+      status: hasActual ? 'ready' : 'pending',
+    },
+  ]
+}
+
+function buildWorkflowSteps({
+  activeStep,
+  hasRecognizedInput,
+  captureMeta,
+  folderAssets,
+  copyResult,
+  actionResults,
+  smartSummary,
+  finalConclusion,
+  isCapturing,
+  isSearchingFolder,
+  isTestingActions,
+}: {
+  activeStep: ReviewWorkflowStepId | ''
+  hasRecognizedInput: boolean
+  captureMeta: CaptureMeta | null
+  folderAssets: FolderAsset[]
+  copyResult: CopyCheckResult | null
+  actionResults: ActionCheckItem[]
+  smartSummary: string
+  finalConclusion: string
+  isCapturing: boolean
+  isSearchingFolder: boolean
+  isTestingActions: boolean
+}): ReviewWorkflowStep[] {
+  const isActive = (step: ReviewWorkflowStepId) => activeStep === step
+
+  return [
+    {
+      id: 'parse',
+      title: '识别资料',
+      status: isActive('parse') ? 'active' : hasRecognizedInput ? 'done' : 'idle',
+      detail: hasRecognizedInput ? '已识别输入来源' : '等待 URL / 文案 / 路径',
+    },
+    {
+      id: 'collect',
+      title: '采集证据',
+      status: isActive('collect') || isCapturing || isSearchingFolder ? 'active' : captureMeta || folderAssets.length ? 'done' : 'idle',
+      detail: captureMeta ? '页面证据已采集' : folderAssets.length ? '资料已命中' : '等待采集页面和资料',
+    },
+    {
+      id: 'compare',
+      title: '对比检查',
+      status: isActive('compare') || isTestingActions ? 'active' : copyResult || actionResults.length ? 'done' : 'idle',
+      detail: copyResult ? `文案缺失 ${copyResult.missing.length} 条` : actionResults.length ? '功能已点测' : '等待内容和功能检查',
+    },
+    {
+      id: 'conclude',
+      title: '生成结论',
+      status: isActive('conclude') ? 'active' : smartSummary.trim() || finalConclusion.trim() || activeStep === 'done' ? 'done' : 'idle',
+      detail: smartSummary.trim() || finalConclusion.trim() ? '结论草稿已生成' : '等待整理上线建议',
+    },
+  ]
+}
+
+function buildMissingSuggestions({
+  hasUrl,
+  hasDesign,
+  hasActual,
+  hasCms,
+  hasFolderAssets,
+  hasActionResults,
+}: {
+  hasUrl: boolean
+  hasDesign: boolean
+  hasActual: boolean
+  hasCms: boolean
+  hasFolderAssets: boolean
+  hasActionResults: boolean
+}) {
+  const suggestions: string[] = []
+
+  if (!hasUrl) suggestions.push('补充页面 URL 后，可以自动采集页面截图和 DOM 文本。')
+  if (!hasDesign) suggestions.push('上传设计稿截图后，可以判断背景图、入口位置和首屏结构是否一致。')
+  if (!hasCms) suggestions.push('粘贴 CMS 文案或业务方文案后，可以检查页面展示文案是否缺失。')
+  if (!hasFolderAssets) suggestions.push('搜索本地资料文件夹后，可以补充 PRD、UE、设计稿和历史资料证据。')
+  if (!hasActual) suggestions.push('开始验收会自动采集页面截图，用于展示和内容证据。')
+  if (!hasActionResults) suggestions.push('补充 PRD/UE 功能描述后，可以点测按钮入口、跳转和弹窗。')
+
+  return suggestions.slice(0, 4)
 }
 
 function loadPersistedReviewState(): PersistedReviewState {
@@ -2517,6 +2753,9 @@ function ProductHero({
   pageType,
   chatInput,
   lastMessage,
+  inputSignals,
+  workflowSteps,
+  workflowNotice,
   isBusy,
   isCapturing,
   isDiffing,
@@ -2540,6 +2779,9 @@ function ProductHero({
   pageType: PageType
   chatInput: string
   lastMessage: string
+  inputSignals: InputSignal[]
+  workflowSteps: ReviewWorkflowStep[]
+  workflowNotice: string
   isBusy: boolean
   isCapturing: boolean
   isDiffing: boolean
@@ -2621,6 +2863,9 @@ function ProductHero({
             </div>
           </div>
 
+          <InputRecognitionPreview signals={inputSignals} />
+          <WorkflowProgress steps={workflowSteps} notice={workflowNotice} />
+
           <div className="hidden">
             <button type="button" className={actionClass} onClick={() => void onCapturePage()} disabled={isCapturing}>
               {isCapturing ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
@@ -2688,6 +2933,52 @@ function ProductHero({
   )
 }
 
+function InputRecognitionPreview({ signals }: { signals: InputSignal[] }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted-foreground">已识别</span>
+      {signals.map((signal) => (
+        <Badge key={signal.id} variant={signal.status === 'ready' ? 'success' : signal.status === 'pending' ? 'warning' : 'outline'}>
+          {signal.label}：{signal.value}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+function WorkflowProgress({ steps, notice }: { steps: ReviewWorkflowStep[]; notice: string }) {
+  return (
+    <div className="mt-3 rounded-xl border border-border bg-panel/70 px-3 py-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">流程</span>
+        <span className="text-xs text-muted-foreground">{notice}</span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-4">
+        {steps.map((step) => (
+          <div key={step.id} className="flex min-w-0 items-center gap-2">
+            <span
+              className={[
+                'size-2.5 shrink-0 rounded-full',
+                step.status === 'done'
+                  ? 'bg-emerald-500'
+                  : step.status === 'active'
+                    ? 'bg-[#20231f]'
+                    : step.status === 'blocked'
+                      ? 'bg-amber-500'
+                      : 'bg-border',
+              ].join(' ')}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium">{step.title}</div>
+              <div className="truncate text-[11px] text-muted-foreground">{step.detail}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ProjectSourceRail({
   projectName,
   captureMeta,
@@ -2699,8 +2990,21 @@ function ProjectSourceRail({
   folderAssets,
   projects,
   activeProjectId,
+  activeSourceId,
+  url,
+  folderPath,
+  folderQuery,
+  assetPreview,
+  isSearchingFolder,
+  onSourceSelect,
   onNewProject,
   onLoadProject,
+  onUrlChange,
+  onDesignUpload,
+  onCmsTextChange,
+  onFolderPathChange,
+  onFolderQueryChange,
+  onSearchFolder,
 }: {
   projectName: string
   captureMeta: CaptureMeta | null
@@ -2712,18 +3016,32 @@ function ProjectSourceRail({
   folderAssets: FolderAsset[]
   projects: ReviewProject[]
   activeProjectId: string
+  activeSourceId: ReviewSourceId
+  url: string
+  folderPath: string
+  folderQuery: string
+  assetPreview: FolderAssetPreview | null
+  isSearchingFolder: boolean
+  onSourceSelect: (sourceId: ReviewSourceId) => void
   onNewProject: () => void
   onLoadProject: (projectId: string) => void
+  onUrlChange: (value: string) => void
+  onDesignUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onCmsTextChange: (value: string) => void
+  onFolderPathChange: (value: string) => void
+  onFolderQueryChange: (value: string) => void
+  onSearchFolder: () => void
 }) {
   const cmsLines = cmsText.split(/\r?\n/).filter((line) => line.trim()).length
   const sourceRows = [
-    { icon: <Link2 />, label: '页面 URL', value: captureMeta ? '已采集' : '待采集', done: Boolean(captureMeta) },
-    { icon: <FileImage />, label: '设计稿截图', value: designPreview ? '已上传' : '待上传', done: Boolean(designPreview) },
-    { icon: <Camera />, label: '页面截图', value: actualPreview ? '已就绪' : '待采集', done: Boolean(actualPreview) },
-    { icon: <ScanText />, label: 'OCR 文案', value: ocrResults.length ? `${ocrResults.length} 张` : '待识别', done: Boolean(ocrResults.length) },
-    { icon: <FileText />, label: 'CMS 文案', value: cmsLines ? `${cmsLines} 行` : '待粘贴', done: Boolean(cmsLines) },
-    { icon: <FolderOpen />, label: '本地资料', value: folderAssets.length ? `${folderAssets.length} 个` : '待搜索', done: Boolean(folderAssets.length) },
+    { id: 'url' as const, icon: <Link2 />, label: '页面 URL', value: captureMeta ? '已采集' : '待采集', done: Boolean(captureMeta) },
+    { id: 'design' as const, icon: <FileImage />, label: '设计稿截图', value: designPreview ? '已上传' : '待上传', done: Boolean(designPreview) },
+    { id: 'actual' as const, icon: <Camera />, label: '页面截图', value: actualPreview ? '已就绪' : '待采集', done: Boolean(actualPreview) },
+    { id: 'ocr' as const, icon: <ScanText />, label: 'OCR 文案', value: ocrResults.length ? `${ocrResults.length} 张` : '待识别', done: Boolean(ocrResults.length) },
+    { id: 'cms' as const, icon: <FileText />, label: 'CMS 文案', value: cmsLines ? `${cmsLines} 行` : '待粘贴', done: Boolean(cmsLines) },
+    { id: 'folder' as const, icon: <FolderOpen />, label: '本地资料', value: folderAssets.length ? `${folderAssets.length} 个` : '待搜索', done: Boolean(folderAssets.length) },
     {
+      id: 'function' as const,
       icon: <MousePointerClick />,
       label: '功能点测',
       value: actionResults.length ? `${actionResults.length} 项` : '待点测',
@@ -2758,21 +3076,197 @@ function ProjectSourceRail({
 
       <div className="space-y-2">
         {sourceRows.map((row) => (
-          <SourceRow key={row.label} icon={row.icon} label={row.label} value={row.value} done={row.done} />
+          <SourceRow
+            key={row.id}
+            active={activeSourceId === row.id}
+            icon={row.icon}
+            label={row.label}
+            value={row.value}
+            done={row.done}
+            onClick={() => onSourceSelect(row.id)}
+          />
         ))}
       </div>
+      <SourceDetailPanel
+        activeSourceId={activeSourceId}
+        url={url}
+        captureMeta={captureMeta}
+        designPreview={designPreview}
+        actualPreview={actualPreview}
+        cmsText={cmsText}
+        folderPath={folderPath}
+        folderQuery={folderQuery}
+        folderAssets={folderAssets}
+        assetPreview={assetPreview}
+        ocrResults={ocrResults}
+        actionResults={actionResults}
+        isSearchingFolder={isSearchingFolder}
+        onUrlChange={onUrlChange}
+        onDesignUpload={onDesignUpload}
+        onCmsTextChange={onCmsTextChange}
+        onFolderPathChange={onFolderPathChange}
+        onFolderQueryChange={onFolderQueryChange}
+        onSearchFolder={onSearchFolder}
+      />
     </aside>
   )
 }
 
-function SourceRow({ icon, label, value, done }: { icon: ReactNode; label: string; value: string; done: boolean }) {
+function SourceRow({
+  icon,
+  label,
+  value,
+  done,
+  active,
+  onClick,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  done: boolean
+  active: boolean
+  onClick: () => void
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-transparent px-2.5 py-2.5 transition hover:border-border hover:bg-panel">
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        'flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-2.5 text-left transition',
+        active ? 'border-border bg-panel' : 'border-transparent hover:border-border hover:bg-panel',
+      ].join(' ')}
+    >
       <div className="flex min-w-0 items-center gap-2 text-sm [&_svg]:size-4 [&_svg]:shrink-0">
         <span className={done ? 'text-[#207a6f]' : 'text-muted-foreground'}>{icon}</span>
         <span className="truncate">{label}</span>
       </div>
       <Badge variant={done ? 'success' : 'outline'}>{value}</Badge>
+    </button>
+  )
+}
+
+function SourceDetailPanel({
+  activeSourceId,
+  url,
+  captureMeta,
+  designPreview,
+  actualPreview,
+  cmsText,
+  folderPath,
+  folderQuery,
+  folderAssets,
+  assetPreview,
+  ocrResults,
+  actionResults,
+  isSearchingFolder,
+  onUrlChange,
+  onDesignUpload,
+  onCmsTextChange,
+  onFolderPathChange,
+  onFolderQueryChange,
+  onSearchFolder,
+}: {
+  activeSourceId: ReviewSourceId
+  url: string
+  captureMeta: CaptureMeta | null
+  designPreview: string
+  actualPreview: string
+  cmsText: string
+  folderPath: string
+  folderQuery: string
+  folderAssets: FolderAsset[]
+  assetPreview: FolderAssetPreview | null
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  isSearchingFolder: boolean
+  onUrlChange: (value: string) => void
+  onDesignUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onCmsTextChange: (value: string) => void
+  onFolderPathChange: (value: string) => void
+  onFolderQueryChange: (value: string) => void
+  onSearchFolder: () => void
+}) {
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-panel/70 p-3">
+      {activeSourceId === 'url' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">页面 URL</div>
+          <Input value={url} onChange={(event) => onUrlChange(event.target.value)} className="h-9 text-xs" />
+          <p className="text-xs leading-5 text-muted-foreground">
+            {captureMeta ? `已采集：${captureMeta.title || '无标题'}` : '点击开始验收后会自动采集页面截图和 DOM 文本。'}
+          </p>
+        </div>
+      ) : null}
+
+      {activeSourceId === 'design' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">设计稿截图</div>
+          {designPreview ? <img src={designPreview} alt="设计稿截图" className="max-h-44 w-full rounded-lg object-contain" /> : null}
+          <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-medium">
+            <Upload className="size-3.5" />
+            {designPreview ? '替换设计稿' : '上传设计稿'}
+            <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={onDesignUpload} />
+          </label>
+        </div>
+      ) : null}
+
+      {activeSourceId === 'actual' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">页面截图</div>
+          {actualPreview ? (
+            <img src={actualPreview} alt="页面截图" className="max-h-44 w-full rounded-lg object-contain" />
+          ) : (
+            <p className="text-xs leading-5 text-muted-foreground">开始验收后会自动截图。截图用于展示一致性和 DOM 文本证据。</p>
+          )}
+        </div>
+      ) : null}
+
+      {activeSourceId === 'cms' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">CMS / 业务文案</div>
+          <Textarea
+            value={cmsText}
+            onChange={(event) => onCmsTextChange(event.target.value)}
+            placeholder="粘贴 CMS 文案、业务文案或需求描述"
+            className="min-h-32 text-xs"
+          />
+        </div>
+      ) : null}
+
+      {activeSourceId === 'folder' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">本地资料文件夹</div>
+          <Input value={folderPath} onChange={(event) => onFolderPathChange(event.target.value)} className="h-9 text-xs" />
+          <Input value={folderQuery} onChange={(event) => onFolderQueryChange(event.target.value)} className="h-9 text-xs" />
+          <Button size="sm" variant="outline" onClick={onSearchFolder} disabled={isSearchingFolder || !folderPath.trim()}>
+            {isSearchingFolder ? <Loader2 className="animate-spin" /> : <Search />}
+            搜索资料
+          </Button>
+          <p className="text-xs leading-5 text-muted-foreground">
+            已命中 {folderAssets.length} 个资料{assetPreview?.name ? `，当前预览：${assetPreview.name}` : ''}。
+          </p>
+        </div>
+      ) : null}
+
+      {activeSourceId === 'ocr' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">OCR 文案</div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {ocrResults.length ? `已识别 ${ocrResults.length} 张图片。展开高级细节可人工修正 OCR 文案。` : '上传设计稿或采集页面截图后，可在高级细节里运行 OCR。'}
+          </p>
+        </div>
+      ) : null}
+
+      {activeSourceId === 'function' ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">功能点测</div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {actionResults.length
+              ? `已点测 ${actionResults.length} 个功能入口。展开高级细节可查看点击前后截图和失败原因。`
+              : '粘贴 PRD/UE 功能描述后，开始验收会尝试识别并点测按钮入口。'}
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -2783,6 +3277,7 @@ function ReviewResultDocument({
   copyResult,
   actionResults,
   issues,
+  missingSuggestions,
   onStatusChange,
   onNoteChange,
 }: {
@@ -2791,6 +3286,7 @@ function ReviewResultDocument({
   copyResult: CopyCheckResult | null
   actionResults: ActionCheckItem[]
   issues: ReviewIssue[]
+  missingSuggestions: string[]
   onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
   onNoteChange: (itemId: string, note: string) => void
 }) {
@@ -2876,6 +3372,16 @@ function ReviewResultDocument({
             {functionText}
           </p>
         </div>
+        {missingSuggestions.length ? (
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+            <div className="mb-2 text-xs font-semibold text-amber-800">下一步建议</div>
+            <ul className="space-y-1 text-sm leading-6 text-amber-900">
+              {missingSuggestions.map((suggestion) => (
+                <li key={suggestion}>{suggestion}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
 
       <div className="hidden">
