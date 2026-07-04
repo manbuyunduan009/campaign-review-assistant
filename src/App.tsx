@@ -1,9 +1,11 @@
 import type { ChangeEvent, ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Bot,
   Camera,
   ClipboardList,
+  Copy,
+  Download,
   Eye,
   FileImage,
   FileText,
@@ -29,6 +31,7 @@ const captureEndpoint = 'http://127.0.0.1:4317/api/capture'
 const searchFolderEndpoint = 'http://127.0.0.1:4317/api/search-folder'
 const ocrEndpoint = 'http://127.0.0.1:4317/api/ocr'
 const actionCheckEndpoint = 'http://127.0.0.1:4317/api/check-actions'
+const reviewStateStorageKey = 'campaign-review-assistant:review-state:v1'
 const pageTypes: PageType[] = ['网页移动端', '小程序', '游戏内嵌页', '网吧内嵌页']
 const knownBusinessTerms = [
   '下载游戏',
@@ -189,6 +192,7 @@ interface ChatMessage {
 
 type SemanticCategory = 'display' | 'content' | 'function'
 type SemanticStatus = 'passed' | 'warning' | 'manual'
+type ReviewDecisionStatus = 'auto' | 'passed' | 'needs-change' | 'pending' | 'ignored'
 
 interface SemanticReviewItem {
   id: string
@@ -226,6 +230,44 @@ interface BuildSemanticReviewInput {
   folderAssets: FolderAsset[]
 }
 
+interface ReviewDecision {
+  status: ReviewDecisionStatus
+  note: string
+  updatedAt: string
+}
+
+type ReviewDecisionMap = Record<string, ReviewDecision>
+
+interface PersistedReviewState {
+  decisions: ReviewDecisionMap
+  finalConclusion: string
+  pageType?: PageType
+  url?: string
+  cmsText?: string
+  captureMeta?: CaptureMeta | null
+  copyResult?: CopyCheckResult | null
+  ocrResults?: OcrItem[]
+  actionResults?: ActionCheckItem[]
+  folderPath?: string
+  folderQuery?: string
+  folderAssets?: FolderAsset[]
+}
+
+interface MarkdownReportInput {
+  pageType: PageType
+  url: string
+  captureMeta: CaptureMeta | null
+  hasDesign: boolean
+  diffStats: DiffStats | null
+  copyResult: CopyCheckResult | null
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  folderAssets: FolderAsset[]
+  semanticResult: SemanticReviewResult
+  reviewDecisions: ReviewDecisionMap
+  finalConclusion: string
+}
+
 const baseIssues: ReviewIssue[] = [
   {
     id: 1,
@@ -254,9 +296,10 @@ const baseIssues: ReviewIssue[] = [
 ]
 
 function App() {
-  const [pageType, setPageType] = useState<PageType>('网页移动端')
+  const persistedState = useMemo(loadPersistedReviewState, [])
+  const [pageType, setPageType] = useState<PageType>(persistedState.pageType || '网页移动端')
   const [url, setUrl] = useState(
-    'https://test-zt.xoyo.com/jx3.xoyo.com/p/m/2026/07/20/anniversary/#/',
+    persistedState.url || 'https://test-zt.xoyo.com/jx3.xoyo.com/p/m/2026/07/20/anniversary/#/',
   )
   const [designPreview, setDesignPreview] = useState('')
   const [actualPreview, setActualPreview] = useState('')
@@ -272,22 +315,55 @@ function App() {
   const [folderError, setFolderError] = useState('')
   const [ocrError, setOcrError] = useState('')
   const [actionError, setActionError] = useState('')
-  const [captureMeta, setCaptureMeta] = useState<CaptureMeta | null>(null)
+  const [captureMeta, setCaptureMeta] = useState<CaptureMeta | null>(persistedState.captureMeta || null)
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null)
-  const [cmsText, setCmsText] = useState('')
-  const [copyResult, setCopyResult] = useState<CopyCheckResult | null>(null)
-  const [ocrResults, setOcrResults] = useState<OcrItem[]>([])
-  const [actionResults, setActionResults] = useState<ActionCheckItem[]>([])
-  const [folderPath, setFolderPath] = useState('D:\\vscode\\动效\\docs')
-  const [folderQuery, setFolderQuery] = useState('周年庆 预约 演唱会')
-  const [folderAssets, setFolderAssets] = useState<FolderAsset[]>([])
+  const [cmsText, setCmsText] = useState(persistedState.cmsText || '')
+  const [copyResult, setCopyResult] = useState<CopyCheckResult | null>(persistedState.copyResult || null)
+  const [ocrResults, setOcrResults] = useState<OcrItem[]>(persistedState.ocrResults || [])
+  const [actionResults, setActionResults] = useState<ActionCheckItem[]>(persistedState.actionResults || [])
+  const [folderPath, setFolderPath] = useState(persistedState.folderPath || 'D:\\vscode\\动效\\docs')
+  const [folderQuery, setFolderQuery] = useState(persistedState.folderQuery || '周年庆 预约 演唱会')
+  const [folderAssets, setFolderAssets] = useState<FolderAsset[]>(persistedState.folderAssets || [])
   const [chatInput, setChatInput] = useState('')
+  const [reviewDecisions, setReviewDecisions] = useState<ReviewDecisionMap>(persistedState.decisions)
+  const [finalConclusion, setFinalConclusion] = useState(persistedState.finalConclusion)
+  const [reportNotice, setReportNotice] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
       role: 'assistant',
       text: '把页面 URL、资料文件夹地址、CMS 文案、需求或 UE 描述丢给我。我会按展示、内容、功能三部分整理验收线索。',
     },
+  ])
+
+  useEffect(() => {
+    persistReviewState({
+      decisions: reviewDecisions,
+      finalConclusion,
+      pageType,
+      url,
+      cmsText,
+      captureMeta,
+      copyResult,
+      ocrResults,
+      actionResults,
+      folderPath,
+      folderQuery,
+      folderAssets,
+    })
+  }, [
+    actionResults,
+    captureMeta,
+    cmsText,
+    copyResult,
+    finalConclusion,
+    folderAssets,
+    folderPath,
+    folderQuery,
+    ocrResults,
+    pageType,
+    reviewDecisions,
+    url,
   ])
 
   const semanticResult = useMemo(
@@ -309,11 +385,11 @@ function App() {
 
   const issues = useMemo(() => {
     const generatedIssues: ReviewIssue[] = []
-    const semanticWarnings = [
+    const semanticIssueItems = [
       ...semanticResult.display,
       ...semanticResult.content,
       ...semanticResult.function,
-    ].filter((item) => item.status === 'warning')
+    ].filter((item) => shouldShowAsIssue(item, reviewDecisions[item.id]))
 
     if (diffStats) {
       generatedIssues.push({
@@ -337,7 +413,7 @@ function App() {
       })
     }
 
-    semanticWarnings.slice(0, 6).forEach((item, index) => {
+    semanticIssueItems.slice(0, 8).forEach((item, index) => {
       generatedIssues.push({
         id: 20 + index,
         type:
@@ -349,8 +425,25 @@ function App() {
       })
     })
 
-    return [...generatedIssues, ...baseIssues]
-  }, [diffStats, folderAssets.length, semanticResult])
+    const baseReviewIssues = baseIssues.filter((issue) => {
+      if (issue.type === '模块') return !captureMeta
+      if (issue.type === '文案') return !ocrResults.length
+      if (issue.type === '交互') return !actionResults.length
+
+      return true
+    })
+
+    return [...generatedIssues, ...baseReviewIssues]
+  }, [actionResults.length, captureMeta, diffStats, folderAssets.length, ocrResults.length, reviewDecisions, semanticResult])
+
+  const allSemanticItems = useMemo(
+    () => [...semanticResult.display, ...semanticResult.content, ...semanticResult.function],
+    [semanticResult],
+  )
+  const decisionStats = useMemo(
+    () => summarizeReviewDecisions(allSemanticItems, reviewDecisions),
+    [allSemanticItems, reviewDecisions],
+  )
 
   const report = useMemo(
     () =>
@@ -375,11 +468,45 @@ function App() {
         actionResults.length
           ? `功能点测：通过 ${actionResults.filter((item) => item.status === 'passed').length} 项，风险 ${actionResults.filter((item) => item.status === 'warning').length} 项`
           : '功能点测：未运行',
+        `人工确认：通过 ${decisionStats.passed}，需修改 ${decisionStats.needsChange}，待确认 ${decisionStats.pending}，忽略 ${decisionStats.ignored}`,
+        finalConclusion.trim() ? `最终结论：${finalConclusion.trim()}` : '最终结论：未填写',
         `展示检查：${formatSemanticSummary(semanticResult.summary.display)}`,
         `内容检查：${formatSemanticSummary(semanticResult.summary.content)}`,
         `功能检查：${formatSemanticSummary(semanticResult.summary.function)}`,
       ].join('\n'),
-    [actionResults, captureMeta, copyResult, designPreview, diffStats, folderAssets.length, ocrResults, pageType, semanticResult, url],
+    [actionResults, captureMeta, copyResult, decisionStats, designPreview, diffStats, finalConclusion, folderAssets.length, ocrResults, pageType, semanticResult, url],
+  )
+
+  const markdownReport = useMemo(
+    () =>
+      buildMarkdownReport({
+        pageType,
+        url,
+        captureMeta,
+        hasDesign: Boolean(designPreview),
+        diffStats,
+        copyResult,
+        ocrResults,
+        actionResults,
+        folderAssets,
+        semanticResult,
+        reviewDecisions,
+        finalConclusion,
+      }),
+    [
+      actionResults,
+      captureMeta,
+      copyResult,
+      designPreview,
+      diffStats,
+      finalConclusion,
+      folderAssets,
+      ocrResults,
+      pageType,
+      reviewDecisions,
+      semanticResult,
+      url,
+    ],
   )
 
   function addMessage(role: ChatMessage['role'], text: string) {
@@ -391,6 +518,55 @@ function App() {
         text,
       },
     ])
+  }
+
+  function updateReviewDecisionStatus(itemId: string, status: ReviewDecisionStatus) {
+    setReviewDecisions((current) => {
+      const existing = current[itemId] || { status: 'auto', note: '', updatedAt: '' }
+      const nextDecision = {
+        ...existing,
+        status,
+        updatedAt: new Date().toISOString(),
+      }
+
+      return compactReviewDecisions({
+        ...current,
+        [itemId]: nextDecision,
+      })
+    })
+  }
+
+  function updateReviewDecisionNote(itemId: string, note: string) {
+    setReviewDecisions((current) => {
+      const existing = current[itemId] || { status: 'auto', note: '', updatedAt: '' }
+      const nextDecision = {
+        ...existing,
+        note,
+        updatedAt: new Date().toISOString(),
+      }
+
+      return compactReviewDecisions({
+        ...current,
+        [itemId]: nextDecision,
+      })
+    })
+  }
+
+  async function copyMarkdownReport() {
+    await navigator.clipboard.writeText(markdownReport)
+    setReportNotice('Markdown 报告已复制')
+  }
+
+  function downloadMarkdownReport() {
+    const blob = new Blob([markdownReport], { type: 'text/markdown;charset=utf-8' })
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+
+    link.href = objectUrl
+    link.download = `campaign-review-${formatFileDate(new Date())}.md`
+    link.click()
+    URL.revokeObjectURL(objectUrl)
+    setReportNotice('Markdown 报告已下载')
   }
 
   function handlePreview(
@@ -780,7 +956,12 @@ function App() {
             />
           </section>
 
-          <SemanticChecksPanel result={semanticResult} />
+          <SemanticChecksPanel
+            result={semanticResult}
+            decisions={reviewDecisions}
+            onStatusChange={updateReviewDecisionStatus}
+            onNoteChange={updateReviewDecisionNote}
+          />
 
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <EvidencePanel
@@ -833,6 +1014,30 @@ function App() {
               <ClipboardList className="size-4 text-muted-foreground" />
               <h2 className="text-sm font-semibold">验收摘要</h2>
             </div>
+            <label className="mb-3 block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">最终结论 / 验收备注</span>
+              <Textarea
+                value={finalConclusion}
+                onChange={(event) => setFinalConclusion(event.target.value)}
+                placeholder="例如：核心流程通过，往返接驳预约入口需补充后再上线。"
+                className="min-h-24 text-xs"
+              />
+            </label>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Button variant="outline" onClick={copyMarkdownReport}>
+                <Copy />
+                复制报告
+              </Button>
+              <Button variant="outline" onClick={downloadMarkdownReport}>
+                <Download />
+                下载 Markdown
+              </Button>
+            </div>
+            {reportNotice ? (
+              <p className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                {reportNotice}
+              </p>
+            ) : null}
             <Textarea value={report} readOnly className="min-h-64 font-mono text-xs" />
           </section>
         </aside>
@@ -874,6 +1079,229 @@ function compactText(value: string) {
   if (text.length <= 120) return text
 
   return `${text.slice(0, 120)}...`
+}
+
+function loadPersistedReviewState(): PersistedReviewState {
+  const emptyState = { decisions: {}, finalConclusion: '' }
+
+  if (typeof window === 'undefined') return emptyState
+
+  try {
+    const raw = window.localStorage.getItem(reviewStateStorageKey)
+
+    if (!raw) return emptyState
+
+    const parsed = JSON.parse(raw) as Partial<PersistedReviewState>
+
+    return {
+      decisions: parsed.decisions || {},
+      finalConclusion: String(parsed.finalConclusion || ''),
+      pageType: pageTypes.includes(parsed.pageType as PageType) ? (parsed.pageType as PageType) : undefined,
+      url: parsed.url ? String(parsed.url) : undefined,
+      cmsText: parsed.cmsText ? String(parsed.cmsText) : undefined,
+      captureMeta: parsed.captureMeta || null,
+      copyResult: parsed.copyResult || null,
+      ocrResults: Array.isArray(parsed.ocrResults) ? parsed.ocrResults : [],
+      actionResults: Array.isArray(parsed.actionResults) ? parsed.actionResults : [],
+      folderPath: parsed.folderPath ? String(parsed.folderPath) : undefined,
+      folderQuery: parsed.folderQuery ? String(parsed.folderQuery) : undefined,
+      folderAssets: Array.isArray(parsed.folderAssets) ? parsed.folderAssets : [],
+    }
+  } catch {
+    return emptyState
+  }
+}
+
+function persistReviewState(state: PersistedReviewState) {
+  if (typeof window === 'undefined') return
+
+  window.localStorage.setItem(reviewStateStorageKey, JSON.stringify(state))
+}
+
+function compactReviewDecisions(decisions: ReviewDecisionMap) {
+  return Object.fromEntries(
+    Object.entries(decisions).filter(([, decision]) => {
+      return decision.status !== 'auto' || decision.note.trim()
+    }),
+  )
+}
+
+function shouldShowAsIssue(item: SemanticReviewItem, decision?: ReviewDecision) {
+  if (decision?.status === 'ignored' || decision?.status === 'passed') return false
+  if (decision?.status === 'needs-change') return true
+
+  return item.status === 'warning'
+}
+
+function summarizeReviewDecisions(items: SemanticReviewItem[], decisions: ReviewDecisionMap) {
+  const itemIds = new Set(items.map((item) => item.id))
+  const activeDecisions = Object.entries(decisions).filter(([itemId]) => itemIds.has(itemId))
+
+  return {
+    passed: activeDecisions.filter(([, decision]) => decision.status === 'passed').length,
+    needsChange: activeDecisions.filter(([, decision]) => decision.status === 'needs-change').length,
+    pending: activeDecisions.filter(([, decision]) => decision.status === 'pending').length,
+    ignored: activeDecisions.filter(([, decision]) => decision.status === 'ignored').length,
+    noted: activeDecisions.filter(([, decision]) => decision.note.trim()).length,
+  }
+}
+
+function buildMarkdownReport(input: MarkdownReportInput) {
+  const decisionStats = summarizeReviewDecisions(
+    [...input.semanticResult.display, ...input.semanticResult.content, ...input.semanticResult.function],
+    input.reviewDecisions,
+  )
+  const issueItems = [
+    ...input.semanticResult.display,
+    ...input.semanticResult.content,
+    ...input.semanticResult.function,
+  ].filter((item) => shouldShowAsIssue(item, input.reviewDecisions[item.id]))
+  const lines = [
+    '# 专题验收报告',
+    '',
+    `生成时间：${formatHumanDate(new Date())}`,
+    '',
+    '## 基本信息',
+    '',
+    `- 页面类型：${input.pageType}`,
+    `- 页面 URL：${input.url || '未填写'}`,
+    input.captureMeta
+      ? `- 页面截图：${input.captureMeta.title || '无标题'} / ${input.captureMeta.width} x ${input.captureMeta.height}`
+      : '- 页面截图：未采集',
+    `- 设计稿：${input.hasDesign ? '已上传' : '未上传'}`,
+    `- 视觉参考：${input.diffStats ? `已生成，差异 ${(input.diffStats.ratio * 100).toFixed(2)}%` : '未生成'}`,
+    `- 资料候选：${input.folderAssets.length} 个`,
+    '',
+    '## 最终结论',
+    '',
+    input.finalConclusion.trim() || '未填写',
+    '',
+    '## 汇总',
+    '',
+    `- 展示检查：${formatSemanticSummary(input.semanticResult.summary.display)}`,
+    `- 内容检查：${formatSemanticSummary(input.semanticResult.summary.content)}`,
+    `- 功能检查：${formatSemanticSummary(input.semanticResult.summary.function)}`,
+    `- 人工确认：通过 ${decisionStats.passed}，需修改 ${decisionStats.needsChange}，待确认 ${decisionStats.pending}，忽略 ${decisionStats.ignored}，备注 ${decisionStats.noted}`,
+    `- 问题项：${issueItems.length} 个`,
+    '',
+    '## 问题清单',
+    '',
+    issueItems.length ? '' : '暂无需修改问题。',
+  ]
+
+  issueItems.forEach((item, index) => {
+    const decision = input.reviewDecisions[item.id]
+
+    lines.push(
+      `${index + 1}. ${item.title}`,
+      `   - 分类：${semanticCategoryLabel(item.category)}`,
+      `   - 状态：${reviewDecisionLabel(decision?.status || 'auto', item.status)}`,
+      `   - 来源：${item.source}`,
+      `   - 证据：${item.evidence}`,
+      decision?.note.trim() ? `   - 备注：${decision.note.trim()}` : '',
+    )
+  })
+
+  lines.push(
+    '',
+    '## 展示检查',
+    '',
+    ...renderMarkdownItems(input.semanticResult.display, input.reviewDecisions),
+    '',
+    '## 内容检查',
+    '',
+    ...renderMarkdownItems(input.semanticResult.content, input.reviewDecisions),
+    '',
+    '## 功能检查',
+    '',
+    ...renderMarkdownItems(input.semanticResult.function, input.reviewDecisions),
+    '',
+    '## CMS 文案对比',
+    '',
+    input.copyResult
+      ? `- 匹配 ${input.copyResult.matched.length} 条，缺失 ${input.copyResult.missing.length} 条，忽略 ${input.copyResult.ignored.length} 条`
+      : '- 未运行文案对比',
+  )
+
+  if (input.copyResult?.missing.length) {
+    input.copyResult.missing.forEach((item) => {
+      lines.push(`- 疑似缺失：${item.source}`)
+    })
+  }
+
+  lines.push('', '## 图片 OCR', '')
+
+  if (input.ocrResults.length) {
+    input.ocrResults.forEach((item) => {
+      lines.push(
+        `- ${item.label}：置信度 ${item.confidence.toFixed(1)}`,
+        item.text.trim() ? `  - 文本：${compactText(item.text)}` : '  - 文本：未识别到文字',
+      )
+    })
+  } else {
+    lines.push('- 未运行 OCR')
+  }
+
+  lines.push('', '## 功能点测', '')
+
+  if (input.actionResults.length) {
+    input.actionResults.forEach((item) => {
+      lines.push(
+        `- ${item.title}`,
+        `  - 状态：${semanticStatusLabel(item.status)}`,
+        `  - 证据：${item.evidence}`,
+      )
+    })
+  } else {
+    lines.push('- 未运行功能点测')
+  }
+
+  lines.push('', '## 资料候选', '')
+
+  if (input.folderAssets.length) {
+    input.folderAssets.slice(0, 12).forEach((asset) => {
+      lines.push(`- ${asset.relativePath} (${asset.type})`)
+    })
+  } else {
+    lines.push('- 未搜索资料')
+  }
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+function renderMarkdownItems(items: SemanticReviewItem[], decisions: ReviewDecisionMap) {
+  if (!items.length) return ['暂无检查项。']
+
+  return items.flatMap((item) => {
+    const decision = decisions[item.id]
+
+    return [
+      `- ${item.title}`,
+      `  - 状态：${reviewDecisionLabel(decision?.status || 'auto', item.status)}`,
+      `  - 来源：${item.source}`,
+      `  - 证据：${item.evidence}`,
+      decision?.note.trim() ? `  - 备注：${decision.note.trim()}` : '',
+    ].filter(Boolean)
+  })
+}
+
+function semanticCategoryLabel(category: SemanticCategory) {
+  if (category === 'display') return '展示'
+  if (category === 'content') return '内容'
+
+  return '功能'
+}
+
+function formatHumanDate(date: Date) {
+  return `${date.getFullYear()}-${padDate(date.getMonth() + 1)}-${padDate(date.getDate())} ${padDate(date.getHours())}:${padDate(date.getMinutes())}`
+}
+
+function formatFileDate(date: Date) {
+  return `${date.getFullYear()}${padDate(date.getMonth() + 1)}${padDate(date.getDate())}-${padDate(date.getHours())}${padDate(date.getMinutes())}`
+}
+
+function padDate(value: number) {
+  return String(value).padStart(2, '0')
 }
 
 function buildSemanticReview(input: BuildSemanticReviewInput): SemanticReviewResult {
@@ -1536,7 +1964,17 @@ function ReviewGoalCard({
   )
 }
 
-function SemanticChecksPanel({ result }: { result: SemanticReviewResult }) {
+function SemanticChecksPanel({
+  result,
+  decisions,
+  onStatusChange,
+  onNoteChange,
+}: {
+  result: SemanticReviewResult
+  decisions: ReviewDecisionMap
+  onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
+  onNoteChange: (itemId: string, note: string) => void
+}) {
   const groups: Array<{
     key: SemanticCategory
     title: string
@@ -1569,7 +2007,13 @@ function SemanticChecksPanel({ result }: { result: SemanticReviewResult }) {
             </div>
             <div className="space-y-2">
               {group.items.slice(0, 7).map((item) => (
-                <SemanticCheckRow key={item.id} item={item} />
+                <SemanticCheckRow
+                  key={item.id}
+                  item={item}
+                  decision={decisions[item.id]}
+                  onStatusChange={onStatusChange}
+                  onNoteChange={onNoteChange}
+                />
               ))}
             </div>
           </article>
@@ -1579,15 +2023,46 @@ function SemanticChecksPanel({ result }: { result: SemanticReviewResult }) {
   )
 }
 
-function SemanticCheckRow({ item }: { item: SemanticReviewItem }) {
+function SemanticCheckRow({
+  item,
+  decision,
+  onStatusChange,
+  onNoteChange,
+}: {
+  item: SemanticReviewItem
+  decision?: ReviewDecision
+  onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
+  onNoteChange: (itemId: string, note: string) => void
+}) {
   return (
     <div className="rounded-md border border-border bg-background p-2">
       <div className="mb-1 flex items-start justify-between gap-2">
         <p className="text-sm font-medium leading-5">{item.title}</p>
-        <Badge variant={semanticStatusVariant(item.status)}>{semanticStatusLabel(item.status)}</Badge>
+        <Badge variant={decisionStatusVariant(decision?.status || 'auto', item.status)}>
+          {reviewDecisionLabel(decision?.status || 'auto', item.status)}
+        </Badge>
       </div>
       <p className="text-xs text-muted-foreground">{item.source}</p>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.evidence}</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-[0.75fr_1fr]">
+        <select
+          value={decision?.status || 'auto'}
+          onChange={(event) => onStatusChange(item.id, event.target.value as ReviewDecisionStatus)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+        >
+          <option value="auto">跟随机器判断</option>
+          <option value="passed">人工通过</option>
+          <option value="needs-change">需修改</option>
+          <option value="pending">待确认</option>
+          <option value="ignored">忽略</option>
+        </select>
+        <Input
+          value={decision?.note || ''}
+          onChange={(event) => onNoteChange(item.id, event.target.value)}
+          placeholder="备注"
+          className="h-8 text-xs"
+        />
+      </div>
     </div>
   )
 }
@@ -1597,6 +2072,24 @@ function semanticStatusLabel(status: SemanticStatus) {
   if (status === 'warning') return '风险'
 
   return '待确认'
+}
+
+function reviewDecisionLabel(status: ReviewDecisionStatus, autoStatus: SemanticStatus) {
+  if (status === 'auto') return `机器：${semanticStatusLabel(autoStatus)}`
+  if (status === 'passed') return '人工通过'
+  if (status === 'needs-change') return '需修改'
+  if (status === 'ignored') return '已忽略'
+
+  return '待确认'
+}
+
+function decisionStatusVariant(status: ReviewDecisionStatus, autoStatus: SemanticStatus) {
+  if (status === 'passed') return 'success'
+  if (status === 'needs-change') return 'danger'
+  if (status === 'pending') return 'warning'
+  if (status === 'ignored') return 'outline'
+
+  return semanticStatusVariant(autoStatus)
 }
 
 function semanticStatusVariant(status: SemanticStatus) {
