@@ -31,6 +31,7 @@ import { Badge } from './components/ui/badge'
 import { Button } from './components/ui/button'
 import { Input } from './components/ui/input'
 import { Textarea } from './components/ui/textarea'
+import heroImage from './assets/hero.png'
 import type { PageType, ReviewIssue } from './types'
 
 const captureEndpoint = 'http://127.0.0.1:4317/api/capture'
@@ -454,6 +455,7 @@ function App() {
   const [finalConclusion, setFinalConclusion] = useState(persistedState.finalConclusion)
   const [smartSummary, setSmartSummary] = useState(persistedState.smartSummary || '')
   const [reportNotice, setReportNotice] = useState('')
+  const [showAdvancedDetails, setShowAdvancedDetails] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -1063,6 +1065,27 @@ function App() {
     }
   }
 
+  async function startReview() {
+    if (chatInput.trim()) {
+      await submitChat()
+      return
+    }
+
+    let activeMeta = captureMeta
+
+    if (!activeMeta && url.trim()) {
+      activeMeta = await capturePage()
+    }
+
+    if (cmsText.trim() && activeMeta?.textSample) {
+      runCopyComparison(cmsText, getPageComparisonText(activeMeta, collectOcrText(ocrResults)))
+    }
+
+    if (!smartSummary.trim()) {
+      generateSmartSummary()
+    }
+  }
+
   async function capturePage(targetUrl = url, copyText = cmsText) {
     setIsCapturing(true)
     setCaptureError('')
@@ -1273,246 +1296,169 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen bg-canvas text-foreground">
-      <header className="border-b border-border bg-background">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-md bg-ink text-white">
-              <ShieldCheck className="size-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold tracking-normal">专题验收助手</h1>
-              <p className="text-sm text-muted-foreground">campaign-review-assistant</p>
-            </div>
+    <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(90deg,rgba(21,22,18,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(21,22,18,0.035)_1px,transparent_1px),radial-gradient(circle_at_20%_0%,rgba(183,137,70,0.18),transparent_34%),#f4f2ec] bg-[size:64px_64px,64px_64px,auto] text-foreground">
+      <header className="sticky top-3 z-40 mx-auto mt-3 flex max-w-[1500px] flex-col items-stretch justify-between gap-3 rounded-xl border border-border/80 bg-background/90 px-4 py-3 shadow-[0_16px_42px_rgba(32,30,24,0.08)] backdrop-blur-xl sm:flex-row sm:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-ink text-white shadow-inner">
+            <ShieldCheck className="size-5" />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="success">展示</Badge>
-            <Badge variant="warning">内容</Badge>
-            <Badge variant="outline">功能</Badge>
+          <div>
+            <h1 className="whitespace-nowrap text-lg font-semibold tracking-normal">专题验收助手</h1>
+            <p className="text-xs text-muted-foreground">Campaign review AI workspace</p>
           </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
+          <Button variant="outline" onClick={saveCurrentProject}>
+            <Save />
+            保存
+          </Button>
+          <Button variant="outline" onClick={copyMarkdownReport}>
+            <Copy />
+            复制报告
+          </Button>
+          <Button onClick={downloadMarkdownReport}>
+            <Download />
+            导出报告
+          </Button>
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-[1440px] gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-4">
-          <ProjectAndTemplatePanel
+      <section className="mx-auto max-w-[1500px] px-4 py-5">
+        <ProductHero
+          projectName={projectName}
+          pageType={pageType}
+          chatInput={chatInput}
+          lastMessage={messages[messages.length - 1]?.text || ''}
+          isBusy={isCapturing || isRunningOcr || isTestingActions || isSearchingFolder}
+          isCapturing={isCapturing}
+          isDiffing={isDiffing}
+          isRunningOcr={isRunningOcr}
+          isTestingActions={isTestingActions}
+          canCompareCms={Boolean(cmsText.trim())}
+          canRunOcr={Boolean(designPreview || actualPreview)}
+          canRunActionCheck={Boolean(url.trim())}
+          onProjectNameChange={setProjectName}
+          onPageTypeChange={setPageType}
+          onChatInputChange={setChatInput}
+          onStartReview={startReview}
+          onCapturePage={capturePage}
+          onGenerateDiff={generateDiff}
+          onCompareCmsCopy={compareCmsCopy}
+          onRunOcr={runImageOcr}
+          onRunActionCheck={runActionCheck}
+          onDesignUpload={(event) => handlePreview(event, setDesignPreview, 'design')}
+        />
+
+        <InlineErrors errors={[captureError, copyError, ocrError, actionError, diffError, folderError]} />
+        {reportNotice ? (
+          <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            {reportNotice}
+          </p>
+        ) : null}
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[290px_minmax(0,1fr)]">
+          <ProjectSourceRail
             projectName={projectName}
+            captureMeta={captureMeta}
+            designPreview={designPreview}
+            actualPreview={actualPreview}
+            cmsText={cmsText}
+            ocrResults={ocrResults}
+            actionResults={actionResults}
+            folderAssets={folderAssets}
             projects={projects}
             activeProjectId={activeProjectId}
-            templates={reviewTemplates}
-            activeTemplateId={activeTemplateId}
-            onProjectNameChange={setProjectName}
-            onSaveProject={saveCurrentProject}
-            onLoadProject={loadProject}
-            onDeleteProject={deleteProject}
             onNewProject={createNewProject}
-            onApplyTemplate={applyReviewTemplate}
+            onLoadProject={loadProject}
           />
 
-          <section className="rounded-md border border-border bg-background shadow-sm">
-            <div className="border-b border-border px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Bot className="size-4" />
-                验收对话
-              </div>
-            </div>
-            <div className="max-h-56 space-y-3 overflow-auto p-4">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={message.role === 'user' ? 'ml-auto max-w-[78%]' : 'mr-auto max-w-[82%]'}
-                >
-                  <div
-                    className={
-                      message.role === 'user'
-                        ? 'rounded-md bg-ink px-3 py-2 text-sm text-white'
-                        : 'rounded-md border border-border bg-panel px-3 py-2 text-sm'
-                    }
-                  >
-                    {message.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="border-t border-border p-4">
-              <Textarea
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                placeholder="粘贴页面 URL、资料文件夹地址、CMS 文案、需求或 UE 描述..."
-                className="min-h-24"
-              />
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button onClick={submitChat}>
-                  <Send />
-                  发送
-                </Button>
-                <Button variant="outline" onClick={() => capturePage()} disabled={isCapturing || !url}>
-                  {isCapturing ? <Loader2 className="animate-spin" /> : <Camera />}
-                  自动截图
-                </Button>
-                <Button variant="outline" asChild>
-                  <label>
-                    <Paperclip />
-                    上传设计稿
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      className="sr-only"
-                      onChange={(event) => handlePreview(event, setDesignPreview, 'design')}
-                    />
-                  </label>
-                </Button>
-                <Button variant="outline" onClick={compareCmsCopy} disabled={!cmsText.trim() || !captureMeta?.textSample}>
-                  <FileText />
-                  对比文案
-                </Button>
-                <Button variant="outline" onClick={runImageOcr} disabled={isRunningOcr || (!designPreview && !actualPreview)}>
-                  {isRunningOcr ? <Loader2 className="animate-spin" /> : <ScanText />}
-                  图片 OCR
-                </Button>
-                <Button variant="outline" onClick={runActionCheck} disabled={isTestingActions || !url || !cmsText.trim()}>
-                  {isTestingActions ? <Loader2 className="animate-spin" /> : <MousePointerClick />}
-                  点测功能
-                </Button>
-                <Button variant="outline" onClick={generateDiff} disabled={isDiffing || !designPreview || !actualPreview}>
-                  {isDiffing ? <Loader2 className="animate-spin" /> : <Eye />}
-                  视觉参考
-                </Button>
-              </div>
-              <InlineErrors errors={[captureError, copyError, ocrError, actionError, diffError, folderError]} />
-            </div>
-          </section>
-
-          <section className="grid gap-4 lg:grid-cols-3">
-            <ReviewGoalCard
-              icon={<MonitorSmartphone />}
-              title="页面展示"
-              desc="设计稿、页面截图、背景图、关键入口和模块是否一致。"
-              status={formatGoalStatus(semanticResult.summary.display)}
-            />
-            <ReviewGoalCard
-              icon={<FileText />}
-              title="页面内容"
-              desc="CMS/业务方文案与页面展示文案是否一致。"
-              status={formatGoalStatus(semanticResult.summary.content)}
-            />
-            <ReviewGoalCard
-              icon={<ClipboardList />}
-              title="页面功能"
-              desc="按钮、跳转、弹窗、状态是否符合需求文档和 UE 描述。"
-              status={formatGoalStatus(semanticResult.summary.function)}
-            />
-          </section>
-
-          <SemanticChecksPanel
-            result={semanticResult}
-            decisions={reviewDecisions}
-            onStatusChange={updateReviewDecisionStatus}
-            onNoteChange={updateReviewDecisionNote}
-          />
-
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <EvidencePanel
-              designPreview={designPreview}
-              actualPreview={actualPreview}
-              diffPreview={diffPreview}
-              diffStats={diffStats}
-              pageType={pageType}
-              onPageTypeChange={setPageType}
-              url={url}
-              onUrlChange={setUrl}
-              onDesignUpload={(event) => handlePreview(event, setDesignPreview, 'design')}
-              onActualUpload={(event) => handlePreview(event, setActualPreview, 'actual')}
-            />
-            <ContentAndFolderPanel
-              cmsText={cmsText}
-              onCmsTextChange={(value) => {
-                setCmsText(value)
-                setCopyResult(null)
-              }}
-              copyResult={copyResult}
-              ocrResults={ocrResults}
-              onOcrTextChange={updateOcrText}
-              onOcrReset={resetOcrText}
-              onApplyOcrToCopy={applyOcrCorrectionsToCopy}
-              actionResults={actionResults}
-              folderPath={folderPath}
-              folderQuery={folderQuery}
-              folderAssets={folderAssets}
-              assetPreview={assetPreview}
-              isSearchingFolder={isSearchingFolder}
-              isPreviewingAsset={isPreviewingAsset}
-              onFolderPathChange={setFolderPath}
-              onFolderQueryChange={setFolderQuery}
-              onSearchFolder={() => searchFolder()}
-              onAppendAsset={appendFolderAssetToSource}
-              onPreviewAsset={previewFolderAsset}
-              onUsePreviewAsDesign={usePreviewAsDesign}
-            />
-          </section>
-        </div>
-
-        <aside className="space-y-4">
-          <section className="rounded-md border border-border bg-background p-4 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">问题清单</h2>
-              <Badge variant="danger">{issues.length} 项</Badge>
-            </div>
-            <div className="space-y-2">
-              {issues.map((issue) => (
-                <IssueRow key={issue.id} issue={issue} />
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-md border border-border bg-background p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <ClipboardList className="size-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">验收摘要</h2>
-            </div>
-            <ReviewClosureSummary
+          <div className="min-w-0 space-y-4">
+            <ReviewResultDocument
               semanticResult={semanticResult}
-              decisionStats={decisionStats}
+              decisions={reviewDecisions}
               copyResult={copyResult}
               actionResults={actionResults}
-              folderAssets={folderAssets}
-              ocrResults={ocrResults}
-              hasDesign={Boolean(designPreview)}
-              hasActual={Boolean(actualPreview)}
+              issues={issues}
+              finalConclusion={finalConclusion}
+              onStatusChange={updateReviewDecisionStatus}
+              onNoteChange={updateReviewDecisionNote}
+            />
+
+            <ConclusionDock
+              issues={issues}
+              decisionStats={decisionStats}
+              finalConclusion={finalConclusion}
+              smartSummary={smartSummary}
+              showAdvancedDetails={showAdvancedDetails}
+              onFinalConclusionChange={setFinalConclusion}
               onGenerateConclusion={generateConclusionDraft}
+              onGenerateSmartSummary={generateSmartSummary}
+              onToggleAdvanced={() => setShowAdvancedDetails((current) => !current)}
+              onCopyMarkdown={copyMarkdownReport}
+              onDownloadMarkdown={downloadMarkdownReport}
             />
-            <SmartSummaryPanel
-              summary={smartSummary}
-              onGenerate={generateSmartSummary}
-              onApplyToConclusion={applySmartSummaryToConclusion}
-            />
-            <label className="mb-3 block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">最终结论 / 验收备注</span>
-              <Textarea
-                value={finalConclusion}
-                onChange={(event) => setFinalConclusion(event.target.value)}
-                placeholder="例如：核心流程通过，往返接驳预约入口需补充后再上线。"
-                className="min-h-24 text-xs"
+
+            {showAdvancedDetails ? (
+              <AdvancedDetails
+                projectName={projectName}
+                projects={projects}
+                templates={reviewTemplates}
+                activeProjectId={activeProjectId}
+                activeTemplateId={activeTemplateId}
+                semanticResult={semanticResult}
+                reviewDecisions={reviewDecisions}
+                decisionStats={decisionStats}
+                copyResult={copyResult}
+                ocrResults={ocrResults}
+                actionResults={actionResults}
+                folderAssets={folderAssets}
+                assetPreview={assetPreview}
+                designPreview={designPreview}
+                actualPreview={actualPreview}
+                diffPreview={diffPreview}
+                diffStats={diffStats}
+                pageType={pageType}
+                url={url}
+                cmsText={cmsText}
+                folderPath={folderPath}
+                folderQuery={folderQuery}
+                isSearchingFolder={isSearchingFolder}
+                isPreviewingAsset={isPreviewingAsset}
+                smartSummary={smartSummary}
+                report={report}
+                issues={issues}
+                onProjectNameChange={setProjectName}
+                onSaveProject={saveCurrentProject}
+                onLoadProject={loadProject}
+                onDeleteProject={deleteProject}
+                onNewProject={createNewProject}
+                onApplyTemplate={applyReviewTemplate}
+                onStatusChange={updateReviewDecisionStatus}
+                onNoteChange={updateReviewDecisionNote}
+                onGenerateConclusion={generateConclusionDraft}
+                onGenerateSmartSummary={generateSmartSummary}
+                onApplySmartSummaryToConclusion={applySmartSummaryToConclusion}
+                onPageTypeChange={setPageType}
+                onUrlChange={setUrl}
+                onDesignUpload={(event) => handlePreview(event, setDesignPreview, 'design')}
+                onActualUpload={(event) => handlePreview(event, setActualPreview, 'actual')}
+                onCmsTextChange={(value) => {
+                  setCmsText(value)
+                  setCopyResult(null)
+                }}
+                onOcrTextChange={updateOcrText}
+                onOcrReset={resetOcrText}
+                onApplyOcrToCopy={applyOcrCorrectionsToCopy}
+                onFolderPathChange={setFolderPath}
+                onFolderQueryChange={setFolderQuery}
+                onSearchFolder={() => searchFolder()}
+                onAppendAsset={appendFolderAssetToSource}
+                onPreviewAsset={previewFolderAsset}
+                onUsePreviewAsDesign={usePreviewAsDesign}
               />
-            </label>
-            <div className="mb-3 flex flex-wrap gap-2">
-              <Button variant="outline" onClick={copyMarkdownReport}>
-                <Copy />
-                复制报告
-              </Button>
-              <Button variant="outline" onClick={downloadMarkdownReport}>
-                <Download />
-                下载 Markdown
-              </Button>
-            </div>
-            {reportNotice ? (
-              <p className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                {reportNotice}
-              </p>
             ) : null}
-            <Textarea value={report} readOnly className="min-h-64 font-mono text-xs" />
-          </section>
-        </aside>
+          </div>
+        </div>
       </section>
     </main>
   )
@@ -2565,6 +2511,784 @@ function get2dContext(canvas: HTMLCanvasElement) {
   }
 
   return context
+}
+
+function ProductHero({
+  projectName,
+  pageType,
+  chatInput,
+  lastMessage,
+  isBusy,
+  isCapturing,
+  isDiffing,
+  isRunningOcr,
+  isTestingActions,
+  canCompareCms,
+  canRunOcr,
+  canRunActionCheck,
+  onProjectNameChange,
+  onPageTypeChange,
+  onChatInputChange,
+  onStartReview,
+  onCapturePage,
+  onGenerateDiff,
+  onCompareCmsCopy,
+  onRunOcr,
+  onRunActionCheck,
+  onDesignUpload,
+}: {
+  projectName: string
+  pageType: PageType
+  chatInput: string
+  lastMessage: string
+  isBusy: boolean
+  isCapturing: boolean
+  isDiffing: boolean
+  isRunningOcr: boolean
+  isTestingActions: boolean
+  canCompareCms: boolean
+  canRunOcr: boolean
+  canRunActionCheck: boolean
+  onProjectNameChange: (value: string) => void
+  onPageTypeChange: (value: PageType) => void
+  onChatInputChange: (value: string) => void
+  onStartReview: () => void
+  onCapturePage: () => Promise<CaptureMeta | null>
+  onGenerateDiff: () => Promise<void>
+  onCompareCmsCopy: () => void
+  onRunOcr: () => Promise<void>
+  onRunActionCheck: () => Promise<void>
+  onDesignUpload: (event: ChangeEvent<HTMLInputElement>) => void
+}) {
+  const actionClass =
+    'group inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-3 text-xs font-medium text-white/86 transition hover:border-white/30 hover:bg-white/14 disabled:pointer-events-none disabled:opacity-45'
+
+  return (
+    <section className="relative isolate overflow-hidden rounded-2xl border border-[#20231f]/15 bg-[#171914] px-5 py-5 text-white shadow-[0_30px_90px_rgba(28,26,20,0.22)] md:px-7 md:py-6">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_14%_8%,rgba(216,171,98,0.32),transparent_28%),radial-gradient(circle_at_86%_10%,rgba(78,154,142,0.22),transparent_28%),linear-gradient(135deg,rgba(255,255,255,0.09),transparent_32%)]" />
+      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.16] [background-image:linear-gradient(90deg,#fff_1px,transparent_1px),linear-gradient(180deg,#fff_1px,transparent_1px)] [background-size:38px_38px]" />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0">
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            <Badge className="border-white/12 bg-white/10 text-white" variant="outline">
+              <Bot className="mr-1 size-3.5" />
+              AI Review OS
+            </Badge>
+            <Badge className="border-white/12 bg-white/10 text-white" variant="outline">
+              <MonitorSmartphone className="mr-1 size-3.5" />
+              {pageType}
+            </Badge>
+            <span className="text-xs text-white/55">展示、内容、功能一次验收</span>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_190px]">
+            <Input
+              value={projectName}
+              onChange={(event) => onProjectNameChange(event.target.value)}
+              className="h-11 border-white/16 bg-white/10 text-base text-white placeholder:text-white/40 focus:border-white/35"
+              placeholder="项目名称"
+            />
+            <select
+              value={pageType}
+              onChange={(event) => onPageTypeChange(event.target.value as PageType)}
+              className="h-11 rounded-md border border-white/16 bg-white/10 px-3 text-sm text-white outline-none focus:border-white/35 focus:ring-2 focus:ring-white/10"
+            >
+              {pageTypes.map((type) => (
+                <option key={type} value={type} className="bg-[#171914] text-white">
+                  {type}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/14 bg-[#f7f2e7] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
+            <Textarea
+              value={chatInput}
+              onChange={(event) => onChatInputChange(event.target.value)}
+              placeholder="粘贴页面 URL、CMS 文案、UE/PRD 摘要，或输入本地资料文件夹路径。也可以直接写：右上角需要下载游戏，中间需要预约按钮，背景图要一致。"
+              className="min-h-36 resize-y border-0 bg-transparent px-4 py-4 text-[15px] leading-7 text-[#20231f] placeholder:text-[#777064] focus-visible:ring-0"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#20231f]/10 bg-white/42 px-3 py-3">
+              <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-[#20231f]/12 bg-white px-3 text-sm font-medium text-[#20231f] transition hover:bg-[#f3f0e8]">
+                <Paperclip className="size-4" />
+                上传设计稿
+                <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={onDesignUpload} />
+              </label>
+              <Button onClick={onStartReview} disabled={isBusy} className="h-10 rounded-lg bg-[#20231f] px-4 text-white hover:bg-[#11130f]">
+                {isBusy ? <Loader2 className="animate-spin" /> : <Send />}
+                开始验收
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className={actionClass} onClick={() => void onCapturePage()} disabled={isCapturing}>
+              {isCapturing ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
+              采集页面
+            </button>
+            <button type="button" className={actionClass} onClick={() => void onGenerateDiff()} disabled={isDiffing}>
+              {isDiffing ? <Loader2 className="size-4 animate-spin" /> : <FileImage className="size-4" />}
+              生成视觉参考
+            </button>
+            <button type="button" className={actionClass} onClick={() => void onRunOcr()} disabled={isRunningOcr || !canRunOcr}>
+              {isRunningOcr ? <Loader2 className="size-4 animate-spin" /> : <ScanText className="size-4" />}
+              OCR 识别
+            </button>
+            <button type="button" className={actionClass} onClick={onCompareCmsCopy} disabled={!canCompareCms}>
+              <FileText className="size-4" />
+              CMS 对比
+            </button>
+            <button
+              type="button"
+              className={actionClass}
+              onClick={() => void onRunActionCheck()}
+              disabled={isTestingActions || !canRunActionCheck}
+            >
+              {isTestingActions ? <Loader2 className="size-4 animate-spin" /> : <MousePointerClick className="size-4" />}
+              功能点测
+            </button>
+          </div>
+
+          {lastMessage ? (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.07] px-3 py-2 text-xs leading-5 text-white/72">
+              <Sparkles className="mt-0.5 size-3.5 shrink-0 text-[#d9ad6c]" />
+              <span>{compactText(lastMessage)}</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="relative hidden min-h-80 overflow-hidden rounded-xl border border-white/10 bg-white/[0.06] xl:block">
+          <div className="absolute inset-x-5 top-5 flex items-center justify-between text-xs text-white/55">
+            <span>Review intelligence</span>
+            <span>{new Date().getFullYear()}</span>
+          </div>
+          <img
+            src={heroImage}
+            alt="AI 验收工作台"
+            className="absolute left-1/2 top-[52%] w-[260px] -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_30px_55px_rgba(0,0,0,0.35)]"
+          />
+          <div className="absolute inset-x-5 bottom-5 rounded-lg border border-white/10 bg-[#0f110d]/70 p-3 backdrop-blur">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs text-white/55">当前流程</span>
+              <Badge className="border-emerald-300/25 bg-emerald-400/10 text-emerald-100" variant="outline">
+                v1 可用
+              </Badge>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {['输入', '识别', '看板', '结论'].map((step) => (
+                <div key={step} className="rounded-md border border-white/10 bg-white/[0.06] py-2 text-center text-xs text-white/80">
+                  {step}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ProjectSourceRail({
+  projectName,
+  captureMeta,
+  designPreview,
+  actualPreview,
+  cmsText,
+  ocrResults,
+  actionResults,
+  folderAssets,
+  projects,
+  activeProjectId,
+  onNewProject,
+  onLoadProject,
+}: {
+  projectName: string
+  captureMeta: CaptureMeta | null
+  designPreview: string
+  actualPreview: string
+  cmsText: string
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  folderAssets: FolderAsset[]
+  projects: ReviewProject[]
+  activeProjectId: string
+  onNewProject: () => void
+  onLoadProject: (projectId: string) => void
+}) {
+  const cmsLines = cmsText.split(/\r?\n/).filter((line) => line.trim()).length
+  const sourceRows = [
+    { icon: <Link2 />, label: '页面 URL', value: captureMeta ? '已采集' : '待采集', done: Boolean(captureMeta) },
+    { icon: <FileImage />, label: '设计稿截图', value: designPreview ? '已上传' : '待上传', done: Boolean(designPreview) },
+    { icon: <Camera />, label: '页面截图', value: actualPreview ? '已就绪' : '待采集', done: Boolean(actualPreview) },
+    { icon: <ScanText />, label: 'OCR 文案', value: ocrResults.length ? `${ocrResults.length} 张` : '待识别', done: Boolean(ocrResults.length) },
+    { icon: <FileText />, label: 'CMS 文案', value: cmsLines ? `${cmsLines} 行` : '待粘贴', done: Boolean(cmsLines) },
+    { icon: <FolderOpen />, label: '本地资料', value: folderAssets.length ? `${folderAssets.length} 个` : '待搜索', done: Boolean(folderAssets.length) },
+    {
+      icon: <MousePointerClick />,
+      label: '功能点测',
+      value: actionResults.length ? `${actionResults.length} 项` : '待点测',
+      done: Boolean(actionResults.length),
+    },
+  ]
+
+  return (
+    <aside className="rounded-xl border border-border/80 bg-background/92 p-4 shadow-[0_18px_46px_rgba(32,30,24,0.08)] backdrop-blur">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Project</p>
+          <h2 className="mt-1 truncate text-base font-semibold">{projectName || '未命名验收项目'}</h2>
+        </div>
+        <Button size="icon" variant="outline" onClick={onNewProject} aria-label="新建项目">
+          <Plus />
+        </Button>
+      </div>
+
+      <select
+        value={activeProjectId}
+        onChange={(event) => onLoadProject(event.target.value)}
+        className="mb-4 h-10 w-full rounded-lg border border-input bg-panel px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+      >
+        <option value="">选择历史项目</option>
+        {projects.map((project) => (
+          <option key={project.id} value={project.id}>
+            {project.name} / {formatHumanDate(new Date(project.updatedAt))}
+          </option>
+        ))}
+      </select>
+
+      <div className="space-y-2">
+        {sourceRows.map((row) => (
+          <SourceRow key={row.label} icon={row.icon} label={row.label} value={row.value} done={row.done} />
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+function SourceRow({ icon, label, value, done }: { icon: ReactNode; label: string; value: string; done: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel/80 px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-2 text-sm [&_svg]:size-4 [&_svg]:shrink-0">
+        <span className={done ? 'text-[#207a6f]' : 'text-muted-foreground'}>{icon}</span>
+        <span className="truncate">{label}</span>
+      </div>
+      <Badge variant={done ? 'success' : 'outline'}>{value}</Badge>
+    </div>
+  )
+}
+
+function ReviewResultDocument({
+  semanticResult,
+  decisions,
+  copyResult,
+  actionResults,
+  issues,
+  finalConclusion,
+  onStatusChange,
+  onNoteChange,
+}: {
+  semanticResult: SemanticReviewResult
+  decisions: ReviewDecisionMap
+  copyResult: CopyCheckResult | null
+  actionResults: ActionCheckItem[]
+  issues: ReviewIssue[]
+  finalConclusion: string
+  onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
+  onNoteChange: (itemId: string, note: string) => void
+}) {
+  const groups: Array<{
+    key: SemanticCategory
+    title: string
+    kicker: string
+    icon: ReactNode
+    items: SemanticReviewItem[]
+  }> = [
+    {
+      key: 'display',
+      title: '页面展示',
+      kicker: '设计稿、页面截图、背景和关键入口',
+      icon: <FileImage />,
+      items: semanticResult.display,
+    },
+    {
+      key: 'content',
+      title: '页面内容',
+      kicker: copyResult
+        ? `CMS 命中 ${copyResult.matched.length} 条，疑似缺失 ${copyResult.missing.length} 条`
+        : 'DOM 文本、OCR 文案、CMS 文案',
+      icon: <ScanText />,
+      items: semanticResult.content,
+    },
+    {
+      key: 'function',
+      title: '页面功能',
+      kicker: actionResults.length
+        ? `点测 ${actionResults.length} 项，风险 ${actionResults.filter((item) => item.status !== 'passed').length} 项`
+        : '按钮入口、跳转、弹窗和交互状态',
+      icon: <MousePointerClick />,
+      items: semanticResult.function,
+    },
+  ]
+  const riskCount = issues.length
+  const warningCount =
+    semanticResult.summary.display.warning + semanticResult.summary.content.warning + semanticResult.summary.function.warning
+  const manualCount =
+    semanticResult.summary.display.manual + semanticResult.summary.content.manual + semanticResult.summary.function.manual
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-border/80 bg-background shadow-[0_18px_46px_rgba(32,30,24,0.08)]">
+      <div className="border-b border-border bg-[#fbfaf6] px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Review Board</p>
+            <h2 className="mt-1 text-xl font-semibold">验收结果</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={riskCount ? 'warning' : 'success'}>{riskCount} 个问题</Badge>
+            <Badge variant={warningCount ? 'warning' : 'success'}>{warningCount} 个风险</Badge>
+            <Badge variant={manualCount ? 'outline' : 'success'}>{manualCount} 个待确认</Badge>
+          </div>
+        </div>
+        {finalConclusion.trim() ? (
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-muted-foreground">{finalConclusion.trim()}</p>
+        ) : (
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-muted-foreground">
+            先完成资料识别，结果会按展示、内容、功能三段直接输出。证据和截图可以在高级细节里展开。
+          </p>
+        )}
+      </div>
+
+      <div className="divide-y divide-border">
+        {groups.map((group) => (
+          <ResultSection
+            key={group.key}
+            title={group.title}
+            kicker={group.kicker}
+            icon={group.icon}
+            summary={semanticResult.summary[group.key]}
+            items={group.items}
+            decisions={decisions}
+            onStatusChange={onStatusChange}
+            onNoteChange={onNoteChange}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ResultSection({
+  title,
+  kicker,
+  icon,
+  summary,
+  items,
+  decisions,
+  onStatusChange,
+  onNoteChange,
+}: {
+  title: string
+  kicker: string
+  icon: ReactNode
+  summary: SemanticReviewSummary
+  items: SemanticReviewItem[]
+  decisions: ReviewDecisionMap
+  onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
+  onNoteChange: (itemId: string, note: string) => void
+}) {
+  return (
+    <article className="grid gap-4 px-5 py-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div>
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold [&_svg]:size-4">
+          {icon}
+          {title}
+        </div>
+        <p className="text-xs leading-5 text-muted-foreground">{kicker}</p>
+        <Badge className="mt-3" variant={summary.warning ? 'warning' : summary.manual ? 'outline' : 'success'}>
+          {formatGoalStatus(summary)}
+        </Badge>
+      </div>
+      <div className="space-y-3">
+        {items.length ? (
+          items.map((item) => (
+            <FindingRow
+              key={item.id}
+              item={item}
+              decision={decisions[item.id]}
+              onStatusChange={onStatusChange}
+              onNoteChange={onNoteChange}
+            />
+          ))
+        ) : (
+          <p className="rounded-lg border border-dashed border-border bg-panel px-3 py-4 text-sm text-muted-foreground">
+            暂无识别结果。把 URL、设计稿、CMS 或资料路径丢进上方输入区后开始验收。
+          </p>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function FindingRow({
+  item,
+  decision,
+  onStatusChange,
+  onNoteChange,
+}: {
+  item: SemanticReviewItem
+  decision?: ReviewDecision
+  onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
+  onNoteChange: (itemId: string, note: string) => void
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-panel/70 px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold leading-6">{item.title}</h3>
+          <p className="text-xs text-muted-foreground">{item.source}</p>
+        </div>
+        <Badge variant={decisionStatusVariant(decision?.status || 'auto', item.status)}>
+          {reviewDecisionLabel(decision?.status || 'auto', item.status)}
+        </Badge>
+      </div>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.evidence}</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-[170px_minmax(0,1fr)]">
+        <select
+          value={decision?.status || 'auto'}
+          onChange={(event) => onStatusChange(item.id, event.target.value as ReviewDecisionStatus)}
+          className="h-9 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+        >
+          <option value="auto">跟随机器判断</option>
+          <option value="passed">人工通过</option>
+          <option value="needs-change">需要修改</option>
+          <option value="pending">待确认</option>
+          <option value="ignored">忽略</option>
+        </select>
+        <Input
+          value={decision?.note || ''}
+          onChange={(event) => onNoteChange(item.id, event.target.value)}
+          placeholder="补充验收备注"
+          className="h-9 text-xs"
+        />
+      </div>
+    </div>
+  )
+}
+
+function ConclusionDock({
+  issues,
+  decisionStats,
+  finalConclusion,
+  smartSummary,
+  showAdvancedDetails,
+  onFinalConclusionChange,
+  onGenerateConclusion,
+  onGenerateSmartSummary,
+  onToggleAdvanced,
+  onCopyMarkdown,
+  onDownloadMarkdown,
+}: {
+  issues: ReviewIssue[]
+  decisionStats: ReturnType<typeof summarizeReviewDecisions>
+  finalConclusion: string
+  smartSummary: string
+  showAdvancedDetails: boolean
+  onFinalConclusionChange: (value: string) => void
+  onGenerateConclusion: () => void
+  onGenerateSmartSummary: () => void
+  onToggleAdvanced: () => void
+  onCopyMarkdown: () => void
+  onDownloadMarkdown: () => void
+}) {
+  return (
+    <section className="rounded-xl border border-border/80 bg-[#20231f] p-4 text-white shadow-[0_18px_46px_rgba(32,30,24,0.18)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Sparkles className="size-4 text-[#d9ad6c]" />
+            <h2 className="text-sm font-semibold">AI 结论</h2>
+            <span className="text-xs text-white/50">
+              问题 {issues.length}，人工通过 {decisionStats.passed}，待确认 {decisionStats.pending}
+            </span>
+          </div>
+          <Textarea
+            value={finalConclusion}
+            onChange={(event) => onFinalConclusionChange(event.target.value)}
+            placeholder="生成或填写最终验收结论，例如：上线前需优先确认下载入口、CMS 缺失文案和预约入口跳转。"
+            className="min-h-24 border-white/14 bg-white/8 text-sm leading-6 text-white placeholder:text-white/38 focus-visible:ring-white/20"
+          />
+          {smartSummary.trim() ? <p className="mt-2 text-xs leading-5 text-white/52">{compactText(smartSummary)}</p> : null}
+        </div>
+        <div className="grid content-start gap-2">
+          <Button variant="secondary" onClick={onGenerateConclusion}>
+            <ClipboardList />
+            生成结论
+          </Button>
+          <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onGenerateSmartSummary}>
+            <Sparkles />
+            智能总结
+          </Button>
+          <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onToggleAdvanced}>
+            <Eye />
+            {showAdvancedDetails ? '收起高级细节' : '展开高级细节'}
+          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onCopyMarkdown}>
+              <Copy />
+              复制
+            </Button>
+            <Button variant="outline" className="border-white/16 bg-white/8 text-white hover:bg-white/14" onClick={onDownloadMarkdown}>
+              <Download />
+              导出
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AdvancedDetails({
+  projectName,
+  projects,
+  templates,
+  activeProjectId,
+  activeTemplateId,
+  semanticResult,
+  reviewDecisions,
+  decisionStats,
+  copyResult,
+  ocrResults,
+  actionResults,
+  folderAssets,
+  assetPreview,
+  designPreview,
+  actualPreview,
+  diffPreview,
+  diffStats,
+  pageType,
+  url,
+  cmsText,
+  folderPath,
+  folderQuery,
+  isSearchingFolder,
+  isPreviewingAsset,
+  smartSummary,
+  report,
+  issues,
+  onProjectNameChange,
+  onSaveProject,
+  onLoadProject,
+  onDeleteProject,
+  onNewProject,
+  onApplyTemplate,
+  onStatusChange,
+  onNoteChange,
+  onGenerateConclusion,
+  onGenerateSmartSummary,
+  onApplySmartSummaryToConclusion,
+  onPageTypeChange,
+  onUrlChange,
+  onDesignUpload,
+  onActualUpload,
+  onCmsTextChange,
+  onOcrTextChange,
+  onOcrReset,
+  onApplyOcrToCopy,
+  onFolderPathChange,
+  onFolderQueryChange,
+  onSearchFolder,
+  onAppendAsset,
+  onPreviewAsset,
+  onUsePreviewAsDesign,
+}: {
+  projectName: string
+  projects: ReviewProject[]
+  templates: ReviewTemplate[]
+  activeProjectId: string
+  activeTemplateId: string
+  semanticResult: SemanticReviewResult
+  reviewDecisions: ReviewDecisionMap
+  decisionStats: ReturnType<typeof summarizeReviewDecisions>
+  copyResult: CopyCheckResult | null
+  ocrResults: OcrItem[]
+  actionResults: ActionCheckItem[]
+  folderAssets: FolderAsset[]
+  assetPreview: FolderAssetPreview | null
+  designPreview: string
+  actualPreview: string
+  diffPreview: string
+  diffStats: DiffStats | null
+  pageType: PageType
+  url: string
+  cmsText: string
+  folderPath: string
+  folderQuery: string
+  isSearchingFolder: boolean
+  isPreviewingAsset: boolean
+  smartSummary: string
+  report: string
+  issues: ReviewIssue[]
+  onProjectNameChange: (value: string) => void
+  onSaveProject: () => void
+  onLoadProject: (projectId: string) => void
+  onDeleteProject: (projectId: string) => void
+  onNewProject: () => void
+  onApplyTemplate: (template: ReviewTemplate) => void
+  onStatusChange: (itemId: string, status: ReviewDecisionStatus) => void
+  onNoteChange: (itemId: string, note: string) => void
+  onGenerateConclusion: () => void
+  onGenerateSmartSummary: () => void
+  onApplySmartSummaryToConclusion: () => void
+  onPageTypeChange: (value: PageType) => void
+  onUrlChange: (value: string) => void
+  onDesignUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onActualUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onCmsTextChange: (value: string) => void
+  onOcrTextChange: (itemId: string, text: string) => void
+  onOcrReset: (itemId: string) => void
+  onApplyOcrToCopy: () => void
+  onFolderPathChange: (value: string) => void
+  onFolderQueryChange: (value: string) => void
+  onSearchFolder: () => void
+  onAppendAsset: (asset: FolderAsset) => void
+  onPreviewAsset: (asset: FolderAsset) => void
+  onUsePreviewAsDesign: () => void
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border border-border/80 bg-background/92 p-4 shadow-[0_18px_46px_rgba(32,30,24,0.08)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Evidence Lab</p>
+          <h2 className="mt-1 text-base font-semibold">高级细节</h2>
+        </div>
+        <Badge variant="outline">证据、OCR、点测和报告预览</Badge>
+      </div>
+
+      <ProjectAndTemplatePanel
+        projectName={projectName}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        templates={templates}
+        activeTemplateId={activeTemplateId}
+        onProjectNameChange={onProjectNameChange}
+        onSaveProject={onSaveProject}
+        onLoadProject={onLoadProject}
+        onDeleteProject={onDeleteProject}
+        onNewProject={onNewProject}
+        onApplyTemplate={onApplyTemplate}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <ReviewGoalCard
+          icon={<FileImage />}
+          title="页面展示"
+          desc="对齐设计稿截图、页面截图、关键入口、背景图和首屏结构。"
+          status={formatGoalStatus(semanticResult.summary.display)}
+        />
+        <ReviewGoalCard
+          icon={<ScanText />}
+          title="页面内容"
+          desc="用 DOM 文本、OCR 修正文本和 CMS 文案做缺失检查。"
+          status={formatGoalStatus(semanticResult.summary.content)}
+        />
+        <ReviewGoalCard
+          icon={<MousePointerClick />}
+          title="页面功能"
+          desc="检查按钮入口、跳转、弹窗、URL 变化和失败原因。"
+          status={formatGoalStatus(semanticResult.summary.function)}
+        />
+      </div>
+
+      <SemanticChecksPanel
+        result={semanticResult}
+        decisions={reviewDecisions}
+        onStatusChange={onStatusChange}
+        onNoteChange={onNoteChange}
+      />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <EvidencePanel
+          designPreview={designPreview}
+          actualPreview={actualPreview}
+          diffPreview={diffPreview}
+          diffStats={diffStats}
+          pageType={pageType}
+          onPageTypeChange={onPageTypeChange}
+          url={url}
+          onUrlChange={onUrlChange}
+          onDesignUpload={onDesignUpload}
+          onActualUpload={onActualUpload}
+        />
+        <ContentAndFolderPanel
+          cmsText={cmsText}
+          onCmsTextChange={onCmsTextChange}
+          copyResult={copyResult}
+          ocrResults={ocrResults}
+          onOcrTextChange={onOcrTextChange}
+          onOcrReset={onOcrReset}
+          onApplyOcrToCopy={onApplyOcrToCopy}
+          actionResults={actionResults}
+          folderPath={folderPath}
+          folderQuery={folderQuery}
+          folderAssets={folderAssets}
+          assetPreview={assetPreview}
+          isSearchingFolder={isSearchingFolder}
+          isPreviewingAsset={isPreviewingAsset}
+          onFolderPathChange={onFolderPathChange}
+          onFolderQueryChange={onFolderQueryChange}
+          onSearchFolder={onSearchFolder}
+          onAppendAsset={onAppendAsset}
+          onPreviewAsset={onPreviewAsset}
+          onUsePreviewAsDesign={onUsePreviewAsDesign}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="rounded-md border border-border bg-background p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <ClipboardList className="size-4" />
+              问题清单
+            </div>
+            <Badge variant={issues.length ? 'warning' : 'success'}>{issues.length} 项</Badge>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {issues.map((issue) => (
+              <IssueRow key={issue.id} issue={issue} />
+            ))}
+          </div>
+        </section>
+
+        <aside>
+          <ReviewClosureSummary
+            semanticResult={semanticResult}
+            decisionStats={decisionStats}
+            copyResult={copyResult}
+            actionResults={actionResults}
+            folderAssets={folderAssets}
+            ocrResults={ocrResults}
+            hasDesign={Boolean(designPreview)}
+            hasActual={Boolean(actualPreview)}
+            onGenerateConclusion={onGenerateConclusion}
+          />
+          <SmartSummaryPanel
+            summary={smartSummary}
+            onGenerate={onGenerateSmartSummary}
+            onApplyToConclusion={onApplySmartSummaryToConclusion}
+          />
+          <div className="rounded-md border border-border bg-panel p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+              <FileText className="size-3.5" />
+              报告预览
+            </div>
+            <Textarea value={report} readOnly className="min-h-56 font-mono text-xs" />
+          </div>
+        </aside>
+      </div>
+    </section>
+  )
 }
 
 function ProjectAndTemplatePanel({
