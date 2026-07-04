@@ -15,6 +15,7 @@ import {
   MonitorSmartphone,
   MousePointerClick,
   Paperclip,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -161,6 +162,9 @@ interface OcrItem {
   label: string
   text: string
   confidence: number
+  originalText?: string
+  corrected?: boolean
+  correctedAt?: string
 }
 
 interface OcrResponse {
@@ -563,6 +567,101 @@ function App() {
     })
   }
 
+  function updateOcrText(itemId: string, text: string) {
+    setOcrResults((current) =>
+      current.map((item) => {
+        if (item.id !== itemId) return item
+
+        const originalText = item.originalText ?? item.text
+        const corrected = normalizeCopy(text) !== normalizeCopy(originalText)
+
+        return {
+          ...item,
+          text,
+          originalText,
+          corrected,
+          correctedAt: corrected ? new Date().toISOString() : '',
+        }
+      }),
+    )
+    setCopyResult(null)
+  }
+
+  function resetOcrText(itemId: string) {
+    setOcrResults((current) =>
+      current.map((item) => {
+        if (item.id !== itemId || item.originalText === undefined) return item
+
+        return {
+          ...item,
+          text: item.originalText,
+          corrected: false,
+          correctedAt: '',
+        }
+      }),
+    )
+    setCopyResult(null)
+  }
+
+  function applyOcrCorrectionsToCopy() {
+    setCopyError('')
+
+    try {
+      if (!cmsText.trim()) {
+        throw new Error('请先粘贴 CMS 文档文案')
+      }
+
+      if (!captureMeta?.textSample?.trim()) {
+        throw new Error('请先点击自动截图，获取页面 DOM 文本后再对比')
+      }
+
+      runCopyComparison(cmsText, getPageComparisonText(captureMeta, collectOcrText(ocrResults)))
+      addMessage('assistant', '已使用人工修正后的 OCR 文案重新对比 CMS 文案。')
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : '应用 OCR 修正失败')
+    }
+  }
+
+  function appendFolderAssetToSource(asset: FolderAsset) {
+    const block = [
+      `资料：${asset.relativePath}`,
+      asset.snippet ? `摘录：${asset.snippet}` : '',
+    ].filter(Boolean).join('\n')
+
+    setCmsText((current) => [current.trim(), block].filter(Boolean).join('\n'))
+    setCopyResult(null)
+    setActionResults([])
+    addMessage('assistant', `已把资料候选「${asset.name}」纳入验收输入。`)
+  }
+
+  function generateConclusionDraft() {
+    const issueItems = allSemanticItems.filter((item) => shouldShowAsIssue(item, reviewDecisions[item.id]))
+    const actionRiskCount = actionResults.filter((item) => item.status !== 'passed').length
+    const copyMissingCount = copyResult?.missing.length || 0
+    const correctedOcrCount = ocrResults.filter((item) => item.corrected).length
+    const lines = [
+      `验收对象：${pageType}${url ? ` / ${url}` : ''}`,
+      captureMeta ? `页面截图：已采集「${captureMeta.title || '无标题'}」` : '页面截图：未采集',
+      designPreview ? '展示证据：已上传设计稿，可人工确认关键模块、入口、背景一致性。' : '展示证据：未上传设计稿。',
+      copyResult
+        ? `内容检查：CMS 文案匹配 ${copyResult.matched.length} 条，疑似缺失 ${copyMissingCount} 条。`
+        : '内容检查：尚未运行 CMS 文案对比。',
+      ocrResults.length
+        ? `OCR 证据：识别 ${ocrResults.length} 张图，人工修正 ${correctedOcrCount} 项。`
+        : 'OCR 证据：尚未运行图片 OCR。',
+      actionResults.length
+        ? `功能点测：通过 ${actionResults.length - actionRiskCount} 项，需复核 ${actionRiskCount} 项。`
+        : '功能点测：尚未运行。',
+      folderAssets.length ? `资料引用：已命中 ${folderAssets.length} 个本地资料候选。` : '资料引用：尚未搜索本地资料。',
+      issueItems.length
+        ? `结论建议：当前仍有 ${issueItems.length} 个问题项，建议修正或人工确认后再通过验收。`
+        : '结论建议：当前未发现需修改问题，可结合人工复核后通过验收。',
+    ]
+
+    setFinalConclusion(lines.join('\n'))
+    setReportNotice('结论草稿已生成，可继续人工修改')
+  }
+
   async function copyMarkdownReport() {
     await navigator.clipboard.writeText(markdownReport)
     setReportNotice('Markdown 报告已复制')
@@ -769,7 +868,12 @@ function App() {
         throw new Error(data.message || 'OCR 识别失败')
       }
 
-      const results = data.results || []
+      const results = (data.results || []).map((item) => ({
+        ...item,
+        originalText: item.text,
+        corrected: false,
+        correctedAt: '',
+      }))
 
       setOcrResults(results)
       addMessage('assistant', `图片 OCR 完成：识别 ${results.length} 张图。`)
@@ -998,6 +1102,9 @@ function App() {
               }}
               copyResult={copyResult}
               ocrResults={ocrResults}
+              onOcrTextChange={updateOcrText}
+              onOcrReset={resetOcrText}
+              onApplyOcrToCopy={applyOcrCorrectionsToCopy}
               actionResults={actionResults}
               folderPath={folderPath}
               folderQuery={folderQuery}
@@ -1006,6 +1113,7 @@ function App() {
               onFolderPathChange={setFolderPath}
               onFolderQueryChange={setFolderQuery}
               onSearchFolder={() => searchFolder()}
+              onAppendAsset={appendFolderAssetToSource}
             />
           </section>
         </div>
@@ -1028,6 +1136,17 @@ function App() {
               <ClipboardList className="size-4 text-muted-foreground" />
               <h2 className="text-sm font-semibold">验收摘要</h2>
             </div>
+            <ReviewClosureSummary
+              semanticResult={semanticResult}
+              decisionStats={decisionStats}
+              copyResult={copyResult}
+              actionResults={actionResults}
+              folderAssets={folderAssets}
+              ocrResults={ocrResults}
+              hasDesign={Boolean(designPreview)}
+              hasActual={Boolean(actualPreview)}
+              onGenerateConclusion={generateConclusionDraft}
+            />
             <label className="mb-3 block space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">最终结论 / 验收备注</span>
               <Textarea
@@ -1165,6 +1284,8 @@ function buildMarkdownReport(input: MarkdownReportInput) {
     [...input.semanticResult.display, ...input.semanticResult.content, ...input.semanticResult.function],
     input.reviewDecisions,
   )
+  const correctedOcrCount = input.ocrResults.filter((item) => item.corrected).length
+  const actionRiskCount = input.actionResults.filter((item) => item.status !== 'passed').length
   const issueItems = [
     ...input.semanticResult.display,
     ...input.semanticResult.content,
@@ -1197,6 +1318,14 @@ function buildMarkdownReport(input: MarkdownReportInput) {
     `- 功能检查：${formatSemanticSummary(input.semanticResult.summary.function)}`,
     `- 人工确认：通过 ${decisionStats.passed}，需修改 ${decisionStats.needsChange}，待确认 ${decisionStats.pending}，忽略 ${decisionStats.ignored}，备注 ${decisionStats.noted}`,
     `- 问题项：${issueItems.length} 个`,
+    '',
+    '## 验收闭环',
+    '',
+    `- 展示证据：${input.hasDesign && input.captureMeta ? '设计稿和页面截图已就绪' : '证据不完整'}`,
+    `- 内容对比：${input.copyResult ? `匹配 ${input.copyResult.matched.length} 条，缺失 ${input.copyResult.missing.length} 条` : '未运行'}`,
+    `- OCR 修正：${input.ocrResults.length ? `识别 ${input.ocrResults.length} 张，人工修正 ${correctedOcrCount} 项` : '未运行'}`,
+    `- 功能点测：${input.actionResults.length ? `通过 ${input.actionResults.length - actionRiskCount} 项，风险/待确认 ${actionRiskCount} 项` : '未运行'}`,
+    `- 本地资料：${input.folderAssets.length ? `命中 ${input.folderAssets.length} 个候选` : '未搜索'}`,
     '',
     '## 问题清单',
     '',
@@ -1248,7 +1377,10 @@ function buildMarkdownReport(input: MarkdownReportInput) {
   if (input.ocrResults.length) {
     input.ocrResults.forEach((item) => {
       lines.push(
-        `- ${item.label}：置信度 ${item.confidence.toFixed(1)}`,
+        `- ${item.label}：置信度 ${item.confidence.toFixed(1)}${item.corrected ? ' / 已人工修正' : ''}`,
+        item.corrected && item.originalText !== undefined
+          ? `  - 原始 OCR：${compactText(item.originalText) || '未识别到文字'}`
+          : '',
         item.text.trim() ? `  - 文本：${compactText(item.text)}` : '  - 文本：未识别到文字',
       )
     })
@@ -1287,7 +1419,10 @@ function buildMarkdownReport(input: MarkdownReportInput) {
 
   if (input.folderAssets.length) {
     input.folderAssets.slice(0, 12).forEach((asset) => {
-      lines.push(`- ${asset.relativePath} (${asset.type})`)
+      lines.push(
+        `- ${asset.relativePath} (${asset.type})`,
+        asset.snippet ? `  - 摘录：${asset.snippet}` : '',
+      )
     })
   } else {
     lines.push('- 未搜索资料')
@@ -1494,9 +1629,9 @@ function buildSemanticReview(input: BuildSemanticReviewInput): SemanticReviewRes
     '设计稿 / 页面截图',
     input.ocrResults.length ? 'passed' : 'manual',
     input.ocrResults.length
-      ? input.ocrResults
+      ? `${input.ocrResults
           .map((item) => `${item.label} ${item.text.length} 字 / 置信度 ${item.confidence.toFixed(1)}`)
-          .join('；')
+          .join('；')}；人工修正 ${input.ocrResults.filter((item) => item.corrected).length} 项`
       : '遇到图片化文案时，可点击“图片 OCR”补充文本证据',
   )
 
@@ -2094,6 +2229,77 @@ function SemanticCheckRow({
   )
 }
 
+function ReviewClosureSummary({
+  semanticResult,
+  decisionStats,
+  copyResult,
+  actionResults,
+  folderAssets,
+  ocrResults,
+  hasDesign,
+  hasActual,
+  onGenerateConclusion,
+}: {
+  semanticResult: SemanticReviewResult
+  decisionStats: ReturnType<typeof summarizeReviewDecisions>
+  copyResult: CopyCheckResult | null
+  actionResults: ActionCheckItem[]
+  folderAssets: FolderAsset[]
+  ocrResults: OcrItem[]
+  hasDesign: boolean
+  hasActual: boolean
+  onGenerateConclusion: () => void
+}) {
+  const totalWarnings =
+    semanticResult.summary.display.warning +
+    semanticResult.summary.content.warning +
+    semanticResult.summary.function.warning
+  const actionRiskCount = actionResults.filter((item) => item.status !== 'passed').length
+  const correctedOcrCount = ocrResults.filter((item) => item.corrected).length
+
+  return (
+    <div className="mb-3 rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-muted-foreground">验收闭环</span>
+        <Badge variant={totalWarnings ? 'warning' : 'success'}>{totalWarnings} 个风险</Badge>
+      </div>
+      <div className="space-y-1.5 text-xs text-muted-foreground">
+        <ClosureRow label="展示证据" value={hasDesign && hasActual ? '设计稿和页面截图已就绪' : '证据不完整'} />
+        <ClosureRow
+          label="内容对比"
+          value={copyResult ? `缺失 ${copyResult.missing.length} 条，匹配 ${copyResult.matched.length} 条` : '未运行'}
+        />
+        <ClosureRow
+          label="OCR 修正"
+          value={ocrResults.length ? `识别 ${ocrResults.length} 张，修正 ${correctedOcrCount} 项` : '未运行'}
+        />
+        <ClosureRow
+          label="功能点测"
+          value={actionResults.length ? `风险/待确认 ${actionRiskCount} 项` : '未运行'}
+        />
+        <ClosureRow label="资料候选" value={folderAssets.length ? `${folderAssets.length} 个` : '未搜索'} />
+        <ClosureRow
+          label="人工确认"
+          value={`通过 ${decisionStats.passed}，需改 ${decisionStats.needsChange}，待确认 ${decisionStats.pending}`}
+        />
+      </div>
+      <Button className="mt-3 w-full" variant="outline" onClick={onGenerateConclusion}>
+        <ClipboardList />
+        生成结论草稿
+      </Button>
+    </div>
+  )
+}
+
+function ClosureRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="shrink-0 text-foreground">{label}</span>
+      <span className="text-right">{value}</span>
+    </div>
+  )
+}
+
 function semanticStatusLabel(status: SemanticStatus) {
   if (status === 'passed') return '通过'
   if (status === 'warning') return '风险'
@@ -2229,6 +2435,9 @@ function ContentAndFolderPanel({
   onCmsTextChange,
   copyResult,
   ocrResults,
+  onOcrTextChange,
+  onOcrReset,
+  onApplyOcrToCopy,
   actionResults,
   folderPath,
   folderQuery,
@@ -2237,11 +2446,15 @@ function ContentAndFolderPanel({
   onFolderPathChange,
   onFolderQueryChange,
   onSearchFolder,
+  onAppendAsset,
 }: {
   cmsText: string
   onCmsTextChange: (value: string) => void
   copyResult: CopyCheckResult | null
   ocrResults: OcrItem[]
+  onOcrTextChange: (itemId: string, text: string) => void
+  onOcrReset: (itemId: string) => void
+  onApplyOcrToCopy: () => void
   actionResults: ActionCheckItem[]
   folderPath: string
   folderQuery: string
@@ -2250,6 +2463,7 @@ function ContentAndFolderPanel({
   onFolderPathChange: (value: string) => void
   onFolderQueryChange: (value: string) => void
   onSearchFolder: () => void
+  onAppendAsset: (asset: FolderAsset) => void
 }) {
   return (
     <section className="rounded-md border border-border bg-background p-4 shadow-sm">
@@ -2270,11 +2484,12 @@ function ContentAndFolderPanel({
           <MiniMetric label="候选资料" value={`${folderAssets.length}`} />
         </div>
         {ocrResults.length ? (
-          <ResultList
-            title="图片 OCR 文案"
-            items={ocrResults.map(
-              (item) => `${item.label} / 置信度 ${item.confidence.toFixed(1)}：${compactText(item.text) || '未识别到文字'}`,
-            )}
+          <OcrCorrectionPanel
+            results={ocrResults}
+            canApply={Boolean(cmsText.trim())}
+            onTextChange={onOcrTextChange}
+            onReset={onOcrReset}
+            onApplyToCopy={onApplyOcrToCopy}
           />
         ) : null}
         {actionResults.length ? (
@@ -2300,6 +2515,12 @@ function ContentAndFolderPanel({
               </div>
               <p className="truncate text-xs text-muted-foreground">{asset.relativePath}</p>
               {asset.snippet ? <p className="mt-1 text-xs text-muted-foreground">{asset.snippet}</p> : null}
+              <div className="mt-2 flex justify-end">
+                <Button size="sm" variant="outline" onClick={() => onAppendAsset(asset)}>
+                  <FileText />
+                  纳入输入
+                </Button>
+              </div>
             </article>
           ))}
         </div>
@@ -2328,6 +2549,66 @@ function ResultList({ title, items }: { title: string; items: string[] }) {
           </p>
         ))}
       </div>
+    </div>
+  )
+}
+
+function OcrCorrectionPanel({
+  results,
+  canApply,
+  onTextChange,
+  onReset,
+  onApplyToCopy,
+}: {
+  results: OcrItem[]
+  canApply: boolean
+  onTextChange: (itemId: string, text: string) => void
+  onReset: (itemId: string) => void
+  onApplyToCopy: () => void
+}) {
+  const correctedCount = results.filter((item) => item.corrected).length
+
+  return (
+    <div className="rounded-md border border-border bg-panel p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-muted-foreground">图片 OCR 文案</div>
+        <Badge variant={correctedCount ? 'warning' : 'outline'}>
+          {correctedCount ? `已修正 ${correctedCount}` : '可修正'}
+        </Badge>
+      </div>
+      <div className="max-h-80 space-y-3 overflow-auto pr-1">
+        {results.map((item) => (
+          <article key={item.id} className="rounded-md border border-border bg-background p-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">{item.label}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">置信度 {item.confidence.toFixed(1)}</p>
+              </div>
+              {item.corrected ? <Badge variant="warning">人工修正</Badge> : null}
+            </div>
+            <Textarea
+              value={item.text}
+              onChange={(event) => onTextChange(item.id, event.target.value)}
+              className="min-h-24 font-mono text-xs"
+            />
+            <div className="mt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onReset(item.id)}
+                disabled={!item.corrected || item.originalText === undefined}
+              >
+                <RotateCcw />
+                恢复原文
+              </Button>
+            </div>
+          </article>
+        ))}
+      </div>
+      <Button className="mt-3 w-full" variant="outline" onClick={onApplyToCopy} disabled={!canApply}>
+        <FileText />
+        用修正文案重新对比
+      </Button>
     </div>
   )
 }
