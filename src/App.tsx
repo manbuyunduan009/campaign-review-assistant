@@ -1296,8 +1296,8 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(90deg,rgba(21,22,18,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(21,22,18,0.035)_1px,transparent_1px),radial-gradient(circle_at_20%_0%,rgba(183,137,70,0.18),transparent_34%),#f4f2ec] bg-[size:64px_64px,64px_64px,auto] text-foreground">
-      <header className="sticky top-3 z-40 mx-auto mt-3 flex max-w-[1500px] flex-col items-stretch justify-between gap-3 rounded-xl border border-border/80 bg-background/90 px-4 py-3 shadow-[0_16px_42px_rgba(32,30,24,0.08)] backdrop-blur-xl sm:flex-row sm:items-center">
+    <main className="min-h-screen overflow-x-hidden bg-[#f6f6f2] text-foreground">
+      <header className="sticky top-3 z-40 mx-auto mt-3 flex max-w-[1480px] flex-col items-stretch justify-between gap-3 rounded-xl border border-border/80 bg-background/94 px-4 py-3 shadow-[0_14px_34px_rgba(32,30,24,0.06)] backdrop-blur-xl sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-ink text-white shadow-inner">
             <ShieldCheck className="size-5" />
@@ -1323,7 +1323,7 @@ function App() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-[1500px] px-4 py-5">
+      <section className="mx-auto max-w-[1480px] px-4 py-5">
         <ProductHero
           projectName={projectName}
           pageType={pageType}
@@ -1356,7 +1356,7 @@ function App() {
           </p>
         ) : null}
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[290px_minmax(0,1fr)]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
           <ProjectSourceRail
             projectName={projectName}
             captureMeta={captureMeta}
@@ -2563,7 +2563,7 @@ function ProductHero({
     'group inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-3 text-xs font-medium text-white/86 transition hover:border-white/30 hover:bg-white/14 disabled:pointer-events-none disabled:opacity-45'
 
   return (
-    <section className="relative isolate overflow-hidden rounded-xl border border-border/80 bg-background p-5 text-foreground shadow-[0_16px_42px_rgba(32,30,24,0.07)]">
+    <section className="relative isolate overflow-hidden rounded-2xl border border-border/80 bg-background p-5 text-foreground shadow-[0_18px_38px_rgba(32,30,24,0.055)]">
       <div className="hidden" />
       <div className="hidden" />
 
@@ -2585,13 +2585,13 @@ function ProductHero({
             <Input
               value={projectName}
               onChange={(event) => onProjectNameChange(event.target.value)}
-              className="h-11 bg-panel text-base"
+              className="h-11 rounded-lg bg-panel text-base"
               placeholder="项目名称"
             />
             <select
               value={pageType}
               onChange={(event) => onPageTypeChange(event.target.value as PageType)}
-              className="h-11 rounded-md border border-input bg-panel px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+              className="h-11 rounded-lg border border-input bg-panel px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             >
               {pageTypes.map((type) => (
                 <option key={type} value={type}>
@@ -2601,20 +2601,20 @@ function ProductHero({
             </select>
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-xl border border-white/14 bg-[#f7f2e7] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
+          <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-[#fbfaf6] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
             <Textarea
               value={chatInput}
               onChange={(event) => onChatInputChange(event.target.value)}
               placeholder="粘贴页面 URL、CMS 文案、UE/PRD 摘要，或输入本地资料文件夹路径。也可以直接写：右上角需要下载游戏，中间需要预约按钮，背景图要一致。"
-              className="min-h-36 resize-y border-0 bg-transparent px-4 py-4 text-[15px] leading-7 text-[#20231f] placeholder:text-[#777064] focus-visible:ring-0"
+              className="min-h-40 resize-y border-0 bg-transparent px-4 py-4 text-[15px] leading-7 text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
             />
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#20231f]/10 bg-white/42 px-3 py-3">
-              <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-[#20231f]/12 bg-white px-3 text-sm font-medium text-[#20231f] transition hover:bg-[#f3f0e8]">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-background px-3 py-3">
+              <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 text-sm font-medium text-foreground transition hover:bg-muted">
                 <Paperclip className="size-4" />
                 上传设计稿
                 <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={onDesignUpload} />
               </label>
-              <Button onClick={onStartReview} disabled={isBusy} className="h-10 rounded-lg bg-[#20231f] px-4 text-white hover:bg-[#11130f]">
+              <Button onClick={onStartReview} disabled={isBusy} className="h-10 rounded-lg px-4">
                 {isBusy ? <Loader2 className="animate-spin" /> : <Send />}
                 开始验收
               </Button>
@@ -2732,10 +2732,10 @@ function ProjectSourceRail({
   ]
 
   return (
-    <aside className="rounded-xl border border-border/80 bg-background/92 p-4 shadow-[0_18px_46px_rgba(32,30,24,0.08)] backdrop-blur">
+    <aside className="rounded-2xl border border-border/80 bg-background/88 p-4 shadow-[0_14px_34px_rgba(32,30,24,0.045)] backdrop-blur xl:sticky xl:top-24 xl:self-start">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Project</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Sources</p>
           <h2 className="mt-1 truncate text-base font-semibold">{projectName || '未命名验收项目'}</h2>
         </div>
         <Button size="icon" variant="outline" onClick={onNewProject} aria-label="新建项目">
@@ -2767,7 +2767,7 @@ function ProjectSourceRail({
 
 function SourceRow({ icon, label, value, done }: { icon: ReactNode; label: string; value: string; done: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel/80 px-3 py-2.5">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-transparent px-2.5 py-2.5 transition hover:border-border hover:bg-panel">
       <div className="flex min-w-0 items-center gap-2 text-sm [&_svg]:size-4 [&_svg]:shrink-0">
         <span className={done ? 'text-[#207a6f]' : 'text-muted-foreground'}>{icon}</span>
         <span className="truncate">{label}</span>
@@ -2849,12 +2849,12 @@ function ReviewResultDocument({
   )
 
   return (
-    <section className="overflow-hidden rounded-xl border border-border/80 bg-background shadow-[0_18px_46px_rgba(32,30,24,0.08)]">
-      <div className="border-b border-border bg-[#fbfaf6] px-5 py-4">
+    <section className="overflow-hidden rounded-2xl border border-border/80 bg-background px-6 py-6 shadow-[0_14px_34px_rgba(32,30,24,0.045)]">
+      <div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="hidden">Review Board</p>
-            <h2 className="mt-1 text-xl font-semibold">验收结果</h2>
+            <h2 className="text-2xl font-semibold">验收结果</h2>
           </div>
           <div className="hidden">
             <Badge variant={riskCount ? 'warning' : 'success'}>{riskCount} 个问题</Badge>
@@ -2862,7 +2862,7 @@ function ReviewResultDocument({
             <Badge variant={manualCount ? 'outline' : 'success'}>{manualCount} 个待确认</Badge>
           </div>
         </div>
-        <div className="mt-4 space-y-3 text-sm leading-7 text-foreground">
+        <div className="mt-5 max-w-4xl space-y-4 text-[15px] leading-8 text-foreground">
           <p>
             <strong>页面展示：</strong>
             {displayText}
@@ -3035,7 +3035,7 @@ function ConclusionDock({
   onDownloadMarkdown: () => void
 }) {
   return (
-    <section className="rounded-xl border border-border/80 bg-background p-4 text-foreground shadow-[0_16px_42px_rgba(32,30,24,0.07)]">
+    <section className="rounded-2xl border border-border/80 bg-background p-4 text-foreground shadow-[0_14px_34px_rgba(32,30,24,0.045)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -3049,7 +3049,7 @@ function ConclusionDock({
             value={finalConclusion}
             onChange={(event) => onFinalConclusionChange(event.target.value)}
             placeholder="生成或填写最终验收结论，例如：上线前需优先确认下载入口、CMS 缺失文案和预约入口跳转。"
-            className="min-h-24 bg-panel text-sm leading-6 text-foreground placeholder:text-muted-foreground"
+            className="min-h-28 bg-panel text-sm leading-6 text-foreground placeholder:text-muted-foreground"
           />
           {smartSummary.trim() ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{compactText(smartSummary)}</p> : null}
         </div>
