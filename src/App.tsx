@@ -39,6 +39,7 @@ const searchFolderEndpoint = 'http://127.0.0.1:4317/api/search-folder'
 const assetPreviewEndpoint = 'http://127.0.0.1:4317/api/asset-preview'
 const ocrEndpoint = 'http://127.0.0.1:4317/api/ocr'
 const actionCheckEndpoint = 'http://127.0.0.1:4317/api/check-actions'
+const aiReviewEndpoint = 'http://127.0.0.1:4317/api/ai-review'
 const reviewStateStorageKey = 'campaign-review-assistant:review-state:v1'
 const reviewProjectsStorageKey = 'campaign-review-assistant:projects:v1'
 const pageTypes: PageType[] = ['网页移动端', '小程序', '游戏内嵌页', '网吧内嵌页']
@@ -121,6 +122,11 @@ interface CaptureResponse {
   image?: string
   meta?: CaptureMeta
   message?: string
+}
+
+interface CapturePageResult {
+  meta: CaptureMeta | null
+  image: string
 }
 
 interface DiffStats {
@@ -215,6 +221,23 @@ interface ActionCheckResponse {
   ok: boolean
   results?: ActionCheckItem[]
   durationMs?: number
+  message?: string
+}
+
+interface AiReviewResult {
+  display: string
+  content: string
+  function: string
+  summary: string
+  risks: string[]
+  suggestions: string[]
+  releaseStatus: '可上线' | '有风险可上线' | '阻塞上线' | '资料不足'
+}
+
+interface AiReviewResponse {
+  ok: boolean
+  model?: string
+  result?: AiReviewResult
   message?: string
 }
 
@@ -449,12 +472,14 @@ function App() {
   const [isSearchingFolder, setIsSearchingFolder] = useState(false)
   const [isRunningOcr, setIsRunningOcr] = useState(false)
   const [isTestingActions, setIsTestingActions] = useState(false)
+  const [isRunningAiReview, setIsRunningAiReview] = useState(false)
   const [captureError, setCaptureError] = useState('')
   const [diffError, setDiffError] = useState('')
   const [copyError, setCopyError] = useState('')
   const [folderError, setFolderError] = useState('')
   const [ocrError, setOcrError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [aiError, setAiError] = useState('')
   const [isPreviewingAsset, setIsPreviewingAsset] = useState(false)
   const [captureMeta, setCaptureMeta] = useState<CaptureMeta | null>(persistedState.captureMeta || null)
   const [diffStats, setDiffStats] = useState<DiffStats | null>(persistedState.diffStats || null)
@@ -471,6 +496,7 @@ function App() {
   const [reviewDecisions, setReviewDecisions] = useState<ReviewDecisionMap>(persistedState.decisions)
   const [finalConclusion, setFinalConclusion] = useState(persistedState.finalConclusion)
   const [smartSummary, setSmartSummary] = useState(persistedState.smartSummary || '')
+  const [aiReview, setAiReview] = useState<AiReviewResult | null>(null)
   const [reportNotice, setReportNotice] = useState('')
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false)
   const [activeWorkflowStep, setActiveWorkflowStep] = useState<ReviewWorkflowStepId | ''>('')
@@ -627,6 +653,7 @@ function App() {
         isCapturing,
         isSearchingFolder,
         isTestingActions,
+        isRunningAiReview,
       }),
     [
       actionResults,
@@ -637,6 +664,7 @@ function App() {
       folderAssets,
       inputSignals,
       isCapturing,
+      isRunningAiReview,
       isSearchingFolder,
       isTestingActions,
       smartSummary,
@@ -1103,6 +1131,10 @@ function App() {
     let activeFolder = folderPath
     let activeCmsText = cmsText
     let activeMeta = captureMeta
+    let activeCopyResult = copyResult
+    let activeActionResults = actionResults
+    let activeActualImage = actualPreview
+    let activeFolderAssets = folderAssets
     const text = chatInput.trim()
 
     try {
@@ -1135,26 +1167,50 @@ function App() {
       setWorkflow('collect', '正在采集页面证据，并从本地资料夹里搜索 PRD、UE、CMS 或设计稿线索。')
 
       if (activeFolder.trim() && (!folderAssets.length || Boolean(text && text.includes(activeFolder)))) {
-        await searchFolder(activeFolder, activeCmsText || folderQuery)
+        activeFolderAssets = await searchFolder(activeFolder, activeCmsText || folderQuery)
       }
 
       if (activeUrl.trim()) {
-        activeMeta = await capturePage(activeUrl, activeCmsText)
+        const captureResult = await capturePage(activeUrl, activeCmsText)
+
+        activeMeta = captureResult?.meta || null
+        activeActualImage = captureResult?.image || activeActualImage
       }
 
       setWorkflow('compare', '正在对比页面展示、业务文案和可点击功能入口。')
 
       if (activeCmsText.trim() && activeMeta?.textSample) {
-        runCopyComparison(activeCmsText, getPageComparisonText(activeMeta, collectOcrText(ocrResults)))
+        activeCopyResult = runCopyComparison(activeCmsText, getPageComparisonText(activeMeta, collectOcrText(ocrResults)))
       }
 
       if (activeUrl.trim() && activeCmsText.trim()) {
-        await runActionCheck(activeUrl, activeCmsText)
+        activeActionResults = await runActionCheck(activeUrl, activeCmsText)
       }
 
-      setWorkflow('conclude', '正在整理三段验收结论和上线建议。')
-      generateSmartSummary()
-      generateConclusionDraft()
+      const activeSemanticResult = buildSemanticReview({
+        meta: activeMeta,
+        sourceText: activeCmsText,
+        ocrText: collectOcrText(ocrResults),
+        ocrResults,
+        actionResults: activeActionResults,
+        copyResult: activeCopyResult,
+        diffStats,
+        hasDesign: Boolean(designPreview),
+        hasActual: Boolean(activeActualImage || activeMeta),
+        folderAssets: activeFolderAssets,
+      })
+
+      setWorkflow('conclude', '正在调用 AI 对文字、功能点和图片进行三方面验收。')
+      await runAiReview({
+        targetUrl: activeUrl,
+        sourceText: activeCmsText,
+        meta: activeMeta,
+        copy: activeCopyResult,
+        actions: activeActionResults,
+        assets: activeFolderAssets,
+        semantic: activeSemanticResult,
+        actualImage: activeActualImage,
+      })
       setWorkflow('done', '验收流程已完成。可以查看三段结论，或展开高级细节复核证据。')
     } catch (error) {
       const message = error instanceof Error ? error.message : '验收流程执行失败'
@@ -1184,7 +1240,9 @@ function App() {
         throw new Error(data.message || '截图失败')
       }
 
-      setActualPreview(`data:image/png;base64,${data.image}`)
+      const capturedImage = `data:image/png;base64,${data.image}`
+
+      setActualPreview(capturedImage)
       setCaptureMeta(data.meta || null)
       setCopyResult(null)
       setOcrResults((current) => current.filter((item) => item.id !== 'actual'))
@@ -1203,7 +1261,10 @@ function App() {
         )
       }
 
-      return data.meta || null
+      return {
+        meta: data.meta || null,
+        image: capturedImage,
+      }
     } catch (error) {
       setCaptureError(error instanceof Error ? error.message : '截图失败')
       return null
@@ -1341,10 +1402,96 @@ function App() {
         'assistant',
         `功能点测完成：通过 ${passed} 项，风险 ${warning} 项，待确认 ${manual} 项。`,
       )
+      return results
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '功能点测失败')
+      return []
     } finally {
       setIsTestingActions(false)
+    }
+  }
+
+  async function runAiReview({
+    targetUrl = url,
+    sourceText = cmsText,
+    meta = captureMeta,
+    copy = copyResult,
+    actions = actionResults,
+    assets = folderAssets,
+    semantic = semanticResult,
+    designImage = designPreview,
+    actualImage = actualPreview,
+  }: {
+    targetUrl?: string
+    sourceText?: string
+    meta?: CaptureMeta | null
+    copy?: CopyCheckResult | null
+    actions?: ActionCheckItem[]
+    assets?: FolderAsset[]
+    semantic?: SemanticReviewResult
+    designImage?: string
+    actualImage?: string
+  } = {}) {
+    setIsRunningAiReview(true)
+    setAiError('')
+    setAiReview(null)
+
+    try {
+      const response = await fetch(aiReviewEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pageType,
+          url: targetUrl,
+          cmsText: sourceText,
+          captureMeta: meta,
+          ocrResults,
+          copyResult: copy,
+          actionResults: actions,
+          folderAssets: assets,
+          semanticResult: semantic,
+          designImage,
+          actualImage,
+        }),
+      })
+      const data = (await response.json()) as AiReviewResponse
+
+      if (!response.ok || !data.ok || !data.result) {
+        throw new Error(data.message || 'AI 验收失败')
+      }
+
+      const conclusion = formatAiReviewForConclusion(data.result)
+
+      setAiReview(data.result)
+      setSmartSummary(conclusion)
+      setFinalConclusion(conclusion)
+      setReportNotice(`AI 验收已生成${data.model ? `：${data.model}` : ''}`)
+      addMessage('assistant', `AI 验收已完成：${data.result.releaseStatus}。`)
+
+      return data.result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI 验收失败'
+      const fallbackSummary = buildSmartSummary({
+        pageType,
+        url: targetUrl,
+        captureMeta: meta || null,
+        hasDesign: Boolean(designImage),
+        copyResult: copy || null,
+        ocrResults,
+        actionResults: actions || [],
+        folderAssets: assets || [],
+        semanticResult: semantic,
+        reviewDecisions,
+      })
+
+      setAiError(`${message}。已使用本地规则结果兜底。`)
+      setSmartSummary(fallbackSummary)
+      setFinalConclusion(fallbackSummary)
+      addMessage('assistant', `AI 验收暂不可用：${message}。我先用本地规则生成结论。`)
+
+      return null
+    } finally {
+      setIsRunningAiReview(false)
     }
   }
 
@@ -1364,10 +1511,14 @@ function App() {
         throw new Error(data.message || '资料搜索失败')
       }
 
-      setFolderAssets(data.results || [])
-      addMessage('assistant', `资料搜索完成：扫描 ${data.total || 0} 个文件，命中 ${(data.results || []).length} 个候选资料。`)
+      const results = data.results || []
+
+      setFolderAssets(results)
+      addMessage('assistant', `资料搜索完成：扫描 ${data.total || 0} 个文件，命中 ${results.length} 个候选资料。`)
+      return results
     } catch (error) {
       setFolderError(error instanceof Error ? error.message : '资料搜索失败')
+      return []
     } finally {
       setIsSearchingFolder(false)
     }
@@ -1410,7 +1561,7 @@ function App() {
           inputSignals={inputSignals}
           workflowSteps={workflowSteps}
           workflowNotice={workflowNotice}
-          isBusy={isCapturing || isRunningOcr || isTestingActions || isSearchingFolder}
+          isBusy={isCapturing || isRunningOcr || isTestingActions || isSearchingFolder || isRunningAiReview}
           isCapturing={isCapturing}
           isDiffing={isDiffing}
           isRunningOcr={isRunningOcr}
@@ -1430,7 +1581,7 @@ function App() {
           onDesignUpload={(event) => handlePreview(event, setDesignPreview, 'design')}
         />
 
-        <InlineErrors errors={[captureError, copyError, ocrError, actionError, diffError, folderError]} />
+        <InlineErrors errors={[captureError, copyError, ocrError, actionError, diffError, folderError, aiError]} />
         {reportNotice ? (
           <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
             {reportNotice}
@@ -1472,6 +1623,8 @@ function App() {
           <div className="min-w-0 space-y-4">
             <ReviewResultDocument
               semanticResult={semanticResult}
+              aiReview={aiReview}
+              isRunningAiReview={isRunningAiReview}
               decisions={reviewDecisions}
               copyResult={copyResult}
               actionResults={actionResults}
@@ -1588,6 +1741,24 @@ function getPageComparisonText(meta: CaptureMeta | null, ocrText: string) {
   return [meta?.textSample || '', ocrText].filter(Boolean).join('\n')
 }
 
+function formatAiReviewForConclusion(result: AiReviewResult) {
+  return [
+    `AI 验收状态：${result.releaseStatus}`,
+    '',
+    `页面展示：${result.display}`,
+    '',
+    `页面内容：${result.content}`,
+    '',
+    `页面功能：${result.function}`,
+    '',
+    result.risks.length ? `主要风险：${result.risks.join('；')}` : '',
+    result.suggestions.length ? `建议：${result.suggestions.join('；')}` : '',
+    result.summary ? `总结：${result.summary}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 function compactText(value: string) {
   const text = value.replace(/\s+/g, ' ').trim()
 
@@ -1664,6 +1835,7 @@ function buildWorkflowSteps({
   isCapturing,
   isSearchingFolder,
   isTestingActions,
+  isRunningAiReview,
 }: {
   activeStep: ReviewWorkflowStepId | ''
   hasRecognizedInput: boolean
@@ -1676,6 +1848,7 @@ function buildWorkflowSteps({
   isCapturing: boolean
   isSearchingFolder: boolean
   isTestingActions: boolean
+  isRunningAiReview: boolean
 }): ReviewWorkflowStep[] {
   const isActive = (step: ReviewWorkflowStepId) => activeStep === step
 
@@ -1701,8 +1874,17 @@ function buildWorkflowSteps({
     {
       id: 'conclude',
       title: '生成结论',
-      status: isActive('conclude') ? 'active' : smartSummary.trim() || finalConclusion.trim() || activeStep === 'done' ? 'done' : 'idle',
-      detail: smartSummary.trim() || finalConclusion.trim() ? '结论草稿已生成' : '等待整理上线建议',
+      status:
+        isActive('conclude') || isRunningAiReview
+          ? 'active'
+          : smartSummary.trim() || finalConclusion.trim() || activeStep === 'done'
+            ? 'done'
+            : 'idle',
+      detail: isRunningAiReview
+        ? 'AI 正在生成三方面结论'
+        : smartSummary.trim() || finalConclusion.trim()
+          ? '结论草稿已生成'
+          : '等待整理上线建议',
     },
   ]
 }
@@ -2794,11 +2976,11 @@ function ProductHero({
   onPageTypeChange: (value: PageType) => void
   onChatInputChange: (value: string) => void
   onStartReview: () => void
-  onCapturePage: () => Promise<CaptureMeta | null>
+  onCapturePage: () => Promise<CapturePageResult | null>
   onGenerateDiff: () => Promise<void>
   onCompareCmsCopy: () => void
   onRunOcr: () => Promise<void>
-  onRunActionCheck: () => Promise<void>
+  onRunActionCheck: () => Promise<ActionCheckItem[]>
   onDesignUpload: (event: ChangeEvent<HTMLInputElement>) => void
 }) {
   const actionClass =
@@ -3273,6 +3455,8 @@ function SourceDetailPanel({
 
 function ReviewResultDocument({
   semanticResult,
+  aiReview,
+  isRunningAiReview,
   decisions,
   copyResult,
   actionResults,
@@ -3282,6 +3466,8 @@ function ReviewResultDocument({
   onNoteChange,
 }: {
   semanticResult: SemanticReviewResult
+  aiReview: AiReviewResult | null
+  isRunningAiReview: boolean
   decisions: ReviewDecisionMap
   copyResult: CopyCheckResult | null
   actionResults: ActionCheckItem[]
@@ -3328,21 +3514,28 @@ function ReviewResultDocument({
     semanticResult.summary.display.warning + semanticResult.summary.content.warning + semanticResult.summary.function.warning
   const manualCount =
     semanticResult.summary.display.manual + semanticResult.summary.content.manual + semanticResult.summary.function.manual
-  const displayText = summarizeResultParagraph(
-    semanticResult.display,
-    semanticResult.summary.display,
-    '等待页面 URL、设计稿或页面截图。识别完成后会判断关键入口、背景图、首屏结构是否与预期一致。',
-  )
-  const contentText = summarizeResultParagraph(
-    semanticResult.content,
-    semanticResult.summary.content,
-    '等待 CMS 文案、页面 DOM 文本或 OCR 文案。识别完成后会判断业务文案是否缺失或不一致。',
-  )
-  const functionText = summarizeResultParagraph(
-    semanticResult.function,
-    semanticResult.summary.function,
-    '等待 PRD/UE 功能描述或页面可点击元素。识别完成后会判断按钮入口、跳转和弹窗是否符合预期。',
-  )
+  const displayText =
+    aiReview?.display ||
+    summarizeResultParagraph(
+      semanticResult.display,
+      semanticResult.summary.display,
+      '等待页面 URL、设计稿或页面截图。识别完成后会判断关键入口、背景图、首屏结构是否与预期一致。',
+    )
+  const contentText =
+    aiReview?.content ||
+    summarizeResultParagraph(
+      semanticResult.content,
+      semanticResult.summary.content,
+      '等待 CMS 文案、页面 DOM 文本或 OCR 文案。识别完成后会判断业务文案是否缺失或不一致。',
+    )
+  const functionText =
+    aiReview?.function ||
+    summarizeResultParagraph(
+      semanticResult.function,
+      semanticResult.summary.function,
+      '等待 PRD/UE 功能描述或页面可点击元素。识别完成后会判断按钮入口、跳转和弹窗是否符合预期。',
+    )
+  const aiSuggestions = aiReview ? [...aiReview.risks, ...aiReview.suggestions].filter(Boolean) : []
 
   return (
     <section className="overflow-hidden rounded-2xl border border-border/80 bg-background px-6 py-6 shadow-[0_14px_34px_rgba(32,30,24,0.045)]">
@@ -3351,6 +3544,13 @@ function ReviewResultDocument({
           <div>
             <p className="hidden">Review Board</p>
             <h2 className="text-2xl font-semibold">验收结果</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isRunningAiReview
+                ? 'AI 正在对比文字、功能点和图片。'
+                : aiReview
+                  ? `AI 结论：${aiReview.releaseStatus}`
+                  : '当前为本地规则结论。'}
+            </p>
           </div>
           <div className="hidden">
             <Badge variant={riskCount ? 'warning' : 'success'}>{riskCount} 个问题</Badge>
@@ -3372,10 +3572,16 @@ function ReviewResultDocument({
             {functionText}
           </p>
         </div>
-        {missingSuggestions.length ? (
+        {aiReview?.summary ? (
+          <p className="mt-4 max-w-4xl text-sm leading-7 text-muted-foreground">{aiReview.summary}</p>
+        ) : null}
+        {aiSuggestions.length || missingSuggestions.length ? (
           <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
             <div className="mb-2 text-xs font-semibold text-amber-800">下一步建议</div>
             <ul className="space-y-1 text-sm leading-6 text-amber-900">
+              {aiSuggestions.map((suggestion) => (
+                <li key={suggestion}>{suggestion}</li>
+              ))}
               {missingSuggestions.map((suggestion) => (
                 <li key={suggestion}>{suggestion}</li>
               ))}

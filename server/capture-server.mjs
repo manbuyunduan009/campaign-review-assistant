@@ -1,16 +1,44 @@
 import cors from 'cors'
 import express from 'express'
+import { existsSync, readFileSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { chromium } from 'playwright-core'
 import sharp from 'sharp'
 import { createWorker } from 'tesseract.js'
 
+loadLocalEnv()
+
 const app = express()
 const port = Number(process.env.CAPTURE_PORT || 4317)
 
 app.use(cors({ origin: true }))
-app.use(express.json({ limit: '20mb' }))
+app.use(express.json({ limit: '60mb' }))
+
+function loadLocalEnv() {
+  const envPath = path.resolve(process.cwd(), '.env')
+
+  if (!existsSync(envPath)) return
+
+  const lines = readFileSync(envPath, 'utf8').split(/\r?\n/)
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const separatorIndex = trimmed.indexOf('=')
+
+    if (separatorIndex === -1) continue
+
+    const key = trimmed.slice(0, separatorIndex).trim()
+    const rawValue = trimmed.slice(separatorIndex + 1).trim()
+
+    if (!key || process.env[key]) continue
+
+    process.env[key] = rawValue.replace(/^["']|["']$/g, '')
+  }
+}
 
 function ensureReviewUrl(value) {
   let parsed
@@ -59,6 +87,70 @@ async function launchBrowser() {
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true })
+})
+
+app.post('/api/ai-review', async (request, response) => {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY || process.env.AI_API_KEY
+    const model = process.env.OPENAI_MODEL || process.env.AI_MODEL || 'gpt-5.5'
+    const baseUrl = process.env.OPENAI_BASE_URL || process.env.AI_BASE_URL || 'https://api.andanzhiguang.uk'
+
+    if (!apiKey) {
+      throw new Error('未配置 OPENAI_API_KEY，请先在启动 API 服务前设置环境变量')
+    }
+
+    const body = request.body || {}
+    const prompt = buildAiReviewPrompt(body)
+    const imageParts = await buildAiReviewImageParts([
+      { label: '设计稿截图', dataUrl: body.designImage },
+      { label: '页面截图', dataUrl: body.actualImage },
+    ])
+    const aiResponse = await fetch(resolveChatCompletionsUrl(baseUrl), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'system',
+            content:
+              '你是网站专题产品验收助手。你会基于页面证据、CMS/PRD/UE 文案、功能点测和截图，输出中文结构化验收结论。只返回 JSON，不要返回 Markdown。',
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...imageParts,
+            ],
+          },
+        ],
+      }),
+    })
+
+    const data = await aiResponse.json().catch(() => null)
+
+    if (!aiResponse.ok) {
+      throw new Error(data?.error?.message || data?.message || `AI 接口请求失败：${aiResponse.status}`)
+    }
+
+    const content = String(data?.choices?.[0]?.message?.content || '').trim()
+    const result = normalizeAiReviewResult(parseJsonObject(content), content)
+
+    response.json({
+      ok: true,
+      model,
+      result,
+    })
+  } catch (error) {
+    response.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : 'AI 验收失败',
+    })
+  }
 })
 
 const supportedExtensions = new Set([
@@ -761,6 +853,220 @@ async function clickMatchedElement(page, term) {
 
     return true
   }, term)
+}
+
+function resolveChatCompletionsUrl(baseUrl) {
+  const cleanBaseUrl = String(baseUrl || '').replace(/\/+$/, '')
+
+  if (cleanBaseUrl.endsWith('/chat/completions')) {
+    return cleanBaseUrl
+  }
+
+  if (cleanBaseUrl.endsWith('/v1')) {
+    return `${cleanBaseUrl}/chat/completions`
+  }
+
+  return `${cleanBaseUrl}/v1/chat/completions`
+}
+
+function buildAiReviewPrompt(input) {
+  const captureMeta = input.captureMeta || {}
+  const copyResult = input.copyResult || null
+  const actionResults = Array.isArray(input.actionResults) ? input.actionResults : []
+  const folderAssets = Array.isArray(input.folderAssets) ? input.folderAssets.slice(0, 12) : []
+  const ocrResults = Array.isArray(input.ocrResults) ? input.ocrResults : []
+  const semanticResult = input.semanticResult || {}
+  const pageElements = Array.isArray(captureMeta.interactiveElements)
+    ? captureMeta.interactiveElements.slice(0, 30)
+    : []
+  const pageImages = Array.isArray(captureMeta.images) ? captureMeta.images.slice(0, 20) : []
+  const pageBackgrounds = Array.isArray(captureMeta.backgroundImages)
+    ? captureMeta.backgroundImages.slice(0, 20)
+    : []
+
+  return [
+    '请完成专题页面三方面 AI 验收：文字、功能点、图片/展示。',
+    '',
+    '必须只返回 JSON，字段如下：',
+    '{',
+    '  "display": "页面展示/图片对比结论，说明背景图、入口、模块、设计稿与页面截图是否一致或资料不足",',
+    '  "content": "页面文字/CMS 对比结论，说明匹配、缺失、疑似不一致文案",',
+    '  "function": "功能点对比结论，说明按钮入口、跳转、弹窗、点测结果与需求是否一致",',
+    '  "summary": "总体验收摘要",',
+    '  "risks": ["风险 1", "风险 2"],',
+    '  "suggestions": ["建议 1", "建议 2"],',
+    '  "releaseStatus": "可上线|有风险可上线|阻塞上线|资料不足"',
+    '}',
+    '',
+    '判断规则：',
+    '- 不要做像素级验收，重点判断关键模块、入口、背景图、文案、功能是否一致。',
+    '- 资料不足时必须明确说缺什么，不要假装已经判断。',
+    '- 图片里如果能看到明显入口、背景或文案，请结合设计稿截图和页面截图判断。',
+    '- 功能点要结合 PRD/UE/CMS 描述、可点击元素和点测结果。',
+    '',
+    `页面类型：${safeText(input.pageType)}`,
+    `页面 URL：${safeText(input.url)}`,
+    `CMS/PRD/UE 输入：${truncateText(input.cmsText, 5000)}`,
+    `页面 DOM 文本：${truncateText(captureMeta.textSample, 5000)}`,
+    `OCR 文本：${truncateText(ocrResults.map((item) => `${item.label}: ${item.text}`).join('\n'), 3500)}`,
+    `页面标题：${safeText(captureMeta.title)}`,
+    `页面尺寸：${captureMeta.width || '-'} x ${captureMeta.height || '-'}`,
+    '',
+    `本地规则文案对比：${copyResult ? JSON.stringify(simplifyCopyResult(copyResult)) : '未运行'}`,
+    `功能点测结果：${truncateText(JSON.stringify(actionResults.map(simplifyActionResult)), 4500)}`,
+    `资料命中：${truncateText(JSON.stringify(folderAssets.map(simplifyFolderAsset)), 2500)}`,
+    `可点击元素：${truncateText(JSON.stringify(pageElements.map(simplifyPageElement)), 4000)}`,
+    `页面图片：${truncateText(JSON.stringify(pageImages.map(simplifyPageImage)), 2500)}`,
+    `背景图：${truncateText(JSON.stringify(pageBackgrounds.map(simplifyPageBackground)), 2500)}`,
+    `本地规则检查：${truncateText(JSON.stringify(simplifySemanticResult(semanticResult)), 4000)}`,
+  ].join('\n')
+}
+
+async function buildAiReviewImageParts(images) {
+  const parts = []
+
+  for (const image of images) {
+    const source = String(image.dataUrl || '')
+
+    if (!source.trim()) continue
+
+    try {
+      const buffer = await sharp(decodeImageData(source))
+        .resize({ width: 960, withoutEnlargement: true })
+        .jpeg({ quality: 72 })
+        .toBuffer()
+
+      parts.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:image/jpeg;base64,${buffer.toString('base64')}`,
+        },
+      })
+    } catch (error) {
+      console.warn(`AI 图片压缩失败：${image.label}`, error)
+    }
+  }
+
+  return parts
+}
+
+function parseJsonObject(value) {
+  const text = String(value || '').trim()
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/)
+
+    if (!match) return null
+
+    try {
+      return JSON.parse(match[0])
+    } catch {
+      return null
+    }
+  }
+}
+
+function normalizeAiReviewResult(parsed, rawText) {
+  const value = parsed && typeof parsed === 'object' ? parsed : {}
+
+  return {
+    display: safeText(value.display) || 'AI 未返回页面展示结论。',
+    content: safeText(value.content) || 'AI 未返回页面内容结论。',
+    function: safeText(value.function) || 'AI 未返回页面功能结论。',
+    summary: safeText(value.summary) || truncateText(rawText, 1000) || 'AI 未返回总结。',
+    risks: Array.isArray(value.risks) ? value.risks.map(safeText).filter(Boolean).slice(0, 8) : [],
+    suggestions: Array.isArray(value.suggestions)
+      ? value.suggestions.map(safeText).filter(Boolean).slice(0, 8)
+      : [],
+    releaseStatus: ['可上线', '有风险可上线', '阻塞上线', '资料不足'].includes(value.releaseStatus)
+      ? value.releaseStatus
+      : '资料不足',
+  }
+}
+
+function simplifyCopyResult(result) {
+  return {
+    total: result.total,
+    matched: result.matched?.length || 0,
+    missing: (result.missing || []).slice(0, 20).map((item) => item.source),
+    ignored: (result.ignored || []).slice(0, 12),
+  }
+}
+
+function simplifyActionResult(item) {
+  return {
+    term: item.term,
+    status: item.status,
+    title: item.title,
+    evidence: item.evidence,
+    failureReason: item.failureReason,
+    beforeUrl: item.beforeUrl,
+    afterUrl: item.afterUrl,
+    urlChanged: item.urlChanged,
+    textChanged: item.textChanged,
+    popupOpened: item.popupOpened,
+    dialogs: item.dialogs,
+    matchedElement: item.matchedElement ? simplifyPageElement(item.matchedElement) : null,
+  }
+}
+
+function simplifyFolderAsset(asset) {
+  return {
+    name: asset.name,
+    relativePath: asset.relativePath,
+    type: asset.type,
+    snippet: asset.snippet,
+  }
+}
+
+function simplifyPageElement(element) {
+  return {
+    tag: element.tag,
+    role: element.role,
+    text: element.text,
+    href: element.href,
+    hasClickHandler: element.hasClickHandler,
+    box: element.box,
+  }
+}
+
+function simplifyPageImage(image) {
+  return {
+    src: image.src,
+    alt: image.alt,
+    box: image.box,
+  }
+}
+
+function simplifyPageBackground(background) {
+  return {
+    urls: background.urls,
+    text: background.text,
+    box: background.box,
+  }
+}
+
+function simplifySemanticResult(result) {
+  return {
+    display: (result.display || []).slice(0, 12),
+    content: (result.content || []).slice(0, 12),
+    function: (result.function || []).slice(0, 12),
+    summary: result.summary || null,
+  }
+}
+
+function safeText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function truncateText(value, limit) {
+  const text = safeText(value)
+
+  if (text.length <= limit) return text
+
+  return `${text.slice(0, limit)}...`
 }
 
 function decodeImageData(value) {
